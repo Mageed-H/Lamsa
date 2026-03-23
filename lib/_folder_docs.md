@@ -22,3 +22,6 @@ A Flutter-based Point of Sale (POS) system designed for a clothing store, implem
 - Product management feature
 - POS (Point of Sale) feature
 - Custom widgets and theme management
+
+## main.dart
+ Application entry point. Initializes Flutter bindings, pre-loads the SQLite database instance, enforces RTL text direction for Arabic support, and applies `AppTheme`.
