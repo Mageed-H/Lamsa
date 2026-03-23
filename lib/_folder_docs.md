@@ -33,3 +33,8 @@ This project follows Clean Architecture with the following layers:
 - `product_model.dart` - Product data model
 - `products_page.dart` - Products list/management page
 - `barcode_printer_widget.dart` - Barcode printing widget component
+
+## Core UI & Theme (`lib/core/`)
+* **`theme/app_theme.dart`**: Centralized design system defining primary, secondary, and semantic colors. No hardcoded hex colors are allowed in the UI.
+* **`widgets/custom_text_field.dart`**: Reusable robust text input field with built-in validation support, icon support, and styling tied to `AppTheme`.
+* **`widgets/custom_button.dart`**: Reusable premium primary button, ensuring consistent interactive elements across the application.

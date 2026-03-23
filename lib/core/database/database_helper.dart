@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import '../../features/products/data/models/product_model.dart';
 
 class DatabaseHelper {
   // Singleton pattern لضمان نسخة واحدة من قاعدة البيانات
@@ -62,4 +63,73 @@ class DatabaseHelper {
     final db = await instance.database;
     db.close();
   }
+// ==========================================================
+  // دوال الإدخال والقراءة والتحديث (CRUD Operations)
+  // ==========================================================
+
+  // 1. إضافة منتج جديد (Create)
+  Future<int> insertProduct(ProductModel product) async {
+    try {
+      final db = await instance.database;
+      return await db.insert(
+        'products',
+        product.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace, // لحماية النظام من التوقف إذا صار تعارض
+      );
+    } catch (e) {
+      // تطبيقاً لقاعدة الـ Global Logging (حالياً نطبعها بالكونسول، ومستقبلاً نربطها بملف log)
+      print('Error inserting product: $e'); 
+      return -1; // إرجاع -1 يدل على فشل العملية بدل انهيار التطبيق
+    }
+  }
+
+  // 2. قراءة كل المنتجات (Read All) - تفيدنا بشاشة الجرد والمخزن
+  Future<List<ProductModel>> getAllProducts() async {
+    try {
+      final db = await instance.database;
+      final maps = await db.query('products', orderBy: 'id DESC');
+      return maps.map((map) => ProductModel.fromMap(map)).toList();
+    } catch (e) {
+      print('Error fetching products: $e');
+      return []; // إرجاع لستة فارغة بدل الكراش
+    }
+  }
+
+  // 3. البحث عن منتج بواسطة الباركود - هاي أهم دالة لشاشة الكاشير السريعة!
+  Future<ProductModel?> getProductByBarcode(String barcode) async {
+    try {
+      final db = await instance.database;
+      final maps = await db.query(
+        'products',
+        where: 'barcode = ?',
+        whereArgs: [barcode], // استخدام Parameterized Queries لأمان البيانات
+      );
+
+      if (maps.isNotEmpty) {
+        return ProductModel.fromMap(maps.first);
+      }
+      return null; // إذا الباركود ما موجود
+    } catch (e) {
+      print('Error fetching product by barcode: $e');
+      return null;
+    }
+  }
+
+  // 4. تحديث منتج (Update) - تفيدنا بتحديث الكمية (Stock) بعد البيع أو تحديث السعر
+  Future<int> updateProduct(ProductModel product) async {
+    try {
+      final db = await instance.database;
+      return await db.update(
+        'products',
+        product.toMap(),
+        where: 'id = ?',
+        whereArgs: [product.id], // Parameterized Queries
+      );
+    } catch (e) {
+      print('Error updating product: $e');
+      return 0; // إرجاع 0 يعني لم يتم تحديث أي صف
+    }
+  }
+
+
 }
