@@ -7,9 +7,9 @@ Contains shared, reusable code and utilities used across the entire application.
 
 - **`/database`** - Database management and helper utilities
 - **`/theme`** - App theming, colors, typography, and styling
-
-### `/features`
-Contains feature-specific code organized by feature domain.
+## Features (`lib/features/`)
+### Products Data (`lib/features/products/data/models/`)
+* **`product_model.dart`**: Defines the `ProductModel` entity. Includes strict Null-Safety (`?? ''`), financial precision mapping (`int` for price), SQLite boolean mapping (`1/0` to `true/false`), and standard `toMap`, `fromMap`, and `copyWith` methods.
 
 - **`/products`** - Product management feature
   - **`/data`** - Data access layer
