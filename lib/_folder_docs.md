@@ -10,7 +10,9 @@ Contains shared, reusable code and utilities used across the entire application.
 ## Features (`lib/features/`)
 ### Products Data (`lib/features/products/data/models/`)
 * **`product_model.dart`**: Defines the `ProductModel` entity. Includes strict Null-Safety (`?? ''`), financial precision mapping (`int` for price), SQLite boolean mapping (`1/0` to `true/false`), and standard `toMap`, `fromMap`, and `copyWith` methods.
-
+## Features (`lib/features/`)
+### POS Feature (`lib/features/pos/`)
+* **`pos_page.dart`**: The core Point of Sale screen built with a Scanner-First approach. Utilizes `FocusNode` and `onSubmitted` to capture hardware scanner inputs continuously. Implements local state for the shopping cart and dynamic total calculation based on `INTEGER` financial data.
 - **`/products`** - Product management feature
   - **`/data`** - Data access layer
     - **`/models`** - Data models (usually map to API/database)
