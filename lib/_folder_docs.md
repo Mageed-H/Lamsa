@@ -33,6 +33,7 @@ This project follows Clean Architecture with the following layers:
 - `product_model.dart` - Product data model
 - `products_page.dart` - Products list/management page
 - `barcode_printer_widget.dart` - Barcode printing widget component
+* **`database_helper.dart` (Migration V2)**: Bumped version to 2. Added safe migration (`_upgradeDB`) to create dynamic `categories` table and `suspended_orders` / `suspended_order_items` tables with Foreign Key cascades. Added initial CRUD for categories.
 
 ## Core UI & Theme (`lib/core/`)
 * **`theme/app_theme.dart`**: Centralized design system defining primary, secondary, and semantic colors. No hardcoded hex colors are allowed in the UI.

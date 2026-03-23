@@ -3,7 +3,6 @@ import 'package:path/path.dart';
 import '../../features/products/data/models/product_model.dart';
 
 class DatabaseHelper {
-  // Singleton pattern لضمان نسخة واحدة من قاعدة البيانات
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
@@ -19,18 +18,22 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    // نفتح قاعدة البيانات ونحدد الإصدار الأول
     return await openDatabase(
       path,
-      version: 1,
+      version: 2, // رفعنا الإصدار إلى 2
+      onConfigure: _onConfigure, // تفعيل العلاقات (Foreign Keys)
       onCreate: _createDB,
-      onUpgrade: _upgradeDB,
+      onUpgrade: _upgradeDB, // التحديث الآمن
     );
   }
 
+  // تفعيل الـ Foreign Keys في SQLite
+  Future _onConfigure(Database db) async {
+    await db.execute('PRAGMA foreign_keys = ON');
+  }
+
   Future _createDB(Database db, int version) async {
-    // إنشاء جدول المنتجات (Products)
-    // لاحظ: price نوعه INTEGER لضمان دقة الحسابات المالية
+    // 1. جدول المنتجات
     await db.execute('''
       CREATE TABLE products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,46 +47,74 @@ class DatabaseHelper {
         is_custom_barcode INTEGER DEFAULT 0
       )
     ''');
+    await db.execute('CREATE INDEX idx_product_barcode ON products (barcode);');
 
-    // إنشاء Index حقل الباركود حتى سرعة البحث بجهاز الباركود تصير بأجزاء من الثانية
-    await db.execute('''
-      CREATE INDEX idx_product_barcode ON products (barcode);
-    ''');
+    // إذا كان الإصدار الأول هو نفسه الأخير (تثبيت جديد)، ننشئ الجداول الجديدة فوراً
+    await _createV2Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    // هنا مستقبلاً نضيف أعمدة جديدة بدون ما نحذف البيانات القديمة (Safe Migrations)
-    // مثال:
-    // if (oldVersion < 2) {
-    //   await db.execute('ALTER TABLE products ADD COLUMN discount INTEGER DEFAULT 0');
-    // }
+    if (oldVersion < 2) {
+      // إذا كان المستخدم عنده الإصدار 1، راح تتنفذ هاي الدالة وتضيف الجداول بدون ما تحذف المنتجات القديمة
+      await _createV2Tables(db);
+    }
+  }
+
+  // دالة مساعدة لإنشاء جداول التحديث الجديد (الإصدار 2)
+  Future _createV2Tables(Database db) async {
+    // 2. جدول الأقسام (Categories)
+    await db.execute('''
+      CREATE TABLE categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE
+      )
+    ''');
+    
+    // إضافة أقسام افتراضية للمحل
+    await db.insert('categories', {'name': 'ملافع'});
+    await db.insert('categories', {'name': 'داخليات'});
+
+    // 3. جدول الطلبات المعلقة (الفاتورة الأساسية)
+    await db.execute('''
+      CREATE TABLE suspended_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note TEXT, -- ملاحظة للتعرف على الزبونة
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    // 4. جدول منتجات الفاتورة المعلقة (تفاصيل الفاتورة)
+    await db.execute('''
+      CREATE TABLE suspended_order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL,
+        unit_price INTEGER NOT NULL,
+        FOREIGN KEY (order_id) REFERENCES suspended_orders (id) ON DELETE CASCADE,
+        FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE RESTRICT
+      )
+    ''');
   }
 
   Future close() async {
     final db = await instance.database;
     db.close();
   }
-// ==========================================================
-  // دوال الإدخال والقراءة والتحديث (CRUD Operations)
-  // ==========================================================
 
-  // 1. إضافة منتج جديد (Create)
+  // ==========================================================
+  // دوال الإدخال والقراءة (القديمة الخاصة بالمنتجات)
+  // ==========================================================
   Future<int> insertProduct(ProductModel product) async {
     try {
       final db = await instance.database;
-      return await db.insert(
-        'products',
-        product.toMap(),
-        conflictAlgorithm: ConflictAlgorithm.replace, // لحماية النظام من التوقف إذا صار تعارض
-      );
+      return await db.insert('products', product.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
     } catch (e) {
-      // تطبيقاً لقاعدة الـ Global Logging (حالياً نطبعها بالكونسول، ومستقبلاً نربطها بملف log)
       print('Error inserting product: $e'); 
-      return -1; // إرجاع -1 يدل على فشل العملية بدل انهيار التطبيق
+      return -1; 
     }
   }
 
-  // 2. قراءة كل المنتجات (Read All) - تفيدنا بشاشة الجرد والمخزن
   Future<List<ProductModel>> getAllProducts() async {
     try {
       final db = await instance.database;
@@ -91,45 +122,53 @@ class DatabaseHelper {
       return maps.map((map) => ProductModel.fromMap(map)).toList();
     } catch (e) {
       print('Error fetching products: $e');
-      return []; // إرجاع لستة فارغة بدل الكراش
+      return []; 
     }
   }
 
-  // 3. البحث عن منتج بواسطة الباركود - هاي أهم دالة لشاشة الكاشير السريعة!
   Future<ProductModel?> getProductByBarcode(String barcode) async {
     try {
       final db = await instance.database;
-      final maps = await db.query(
-        'products',
-        where: 'barcode = ?',
-        whereArgs: [barcode], // استخدام Parameterized Queries لأمان البيانات
-      );
-
-      if (maps.isNotEmpty) {
-        return ProductModel.fromMap(maps.first);
-      }
-      return null; // إذا الباركود ما موجود
+      final maps = await db.query('products', where: 'barcode = ?', whereArgs: [barcode]);
+      if (maps.isNotEmpty) return ProductModel.fromMap(maps.first);
+      return null; 
     } catch (e) {
       print('Error fetching product by barcode: $e');
       return null;
     }
   }
 
-  // 4. تحديث منتج (Update) - تفيدنا بتحديث الكمية (Stock) بعد البيع أو تحديث السعر
   Future<int> updateProduct(ProductModel product) async {
     try {
       final db = await instance.database;
-      return await db.update(
-        'products',
-        product.toMap(),
-        where: 'id = ?',
-        whereArgs: [product.id], // Parameterized Queries
-      );
+      return await db.update('products', product.toMap(), where: 'id = ?', whereArgs: [product.id]);
     } catch (e) {
       print('Error updating product: $e');
-      return 0; // إرجاع 0 يعني لم يتم تحديث أي صف
+      return 0; 
     }
   }
 
+  // ==========================================================
+  // دوال الأقسام الجديدة (Categories CRUD)
+  // ==========================================================
+  Future<int> insertCategory(String name) async {
+    try {
+      final db = await instance.database;
+      return await db.insert('categories', {'name': name}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    } catch (e) {
+      print('Error inserting category: $e');
+      return -1;
+    }
+  }
 
+  Future<List<String>> getAllCategories() async {
+    try {
+      final db = await instance.database;
+      final maps = await db.query('categories', orderBy: 'name ASC');
+      return maps.map((map) => map['name'] as String).toList();
+    } catch (e) {
+      print('Error fetching categories: $e');
+      return [];
+    }
+  }
 }
