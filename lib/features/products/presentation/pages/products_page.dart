@@ -4,6 +4,7 @@ import 'package:lamsa/core/theme/app_theme.dart';
 import 'package:lamsa/core/widgets/custom_button.dart';
 import 'package:lamsa/core/widgets/custom_text_field.dart';
 import 'package:lamsa/features/products/data/models/product_model.dart';
+import 'package:lamsa/features/products/presentation/widgets/barcode_printer_widget.dart';
 
 class ProductsPage extends StatefulWidget {
   const ProductsPage({Key? key}) : super(key: key);
@@ -534,6 +535,11 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
+                                  icon: const Icon(Icons.print, color: AppTheme.successColor),
+                                  onPressed: () => BarcodePrinterWidget.show(context, barcode: p.barcode, productName: p.name),
+                                  tooltip: 'طباعة باركود',
+                                ),
+                                IconButton(
                                   icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
                                   onPressed: () => _showEditDialog(p),
                                   tooltip: 'تعديل',
@@ -806,6 +812,14 @@ class _EditProductDialogState extends State<_EditProductDialog> {
                                 style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
                               ),
                             ),
+                            IconButton(
+                              icon: const Icon(Icons.print, size: 18, color: AppTheme.successColor),
+                              onPressed: () => BarcodePrinterWidget.show(context, barcode: b['barcode'] as String, productName: widget.product.name),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              tooltip: 'طباعة',
+                            ),
+                            const SizedBox(width: 8),
                             IconButton(
                               icon: const Icon(Icons.edit, size: 18, color: AppTheme.primaryColor),
                               onPressed: () => _editBarcode(b),

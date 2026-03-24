@@ -30,14 +30,18 @@ class CustomButton extends StatelessWidget {
         onPressed: onPressed,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[
               Icon(icon),
               const SizedBox(width: 8),
             ],
-            Text(
-              text,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            Flexible(
+              child: Text(
+                text,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../features/pos/presentation/pages/pos_page.dart';
 import '../../features/products/presentation/pages/products_page.dart';
+import '../../features/sales/presentation/pages/sales_page.dart';
 import '../theme/app_theme.dart';
 
 class MainLayout extends StatefulWidget {
@@ -17,7 +18,7 @@ class _MainLayoutState extends State<MainLayout> {
   final List<Widget> _pages = [
     const PosPage(), // شاشة الكاشير (Index 0)
     const ProductsPage(), // شاشة إدارة المنتجات (Index 1)
-    const Center(child: Text('شاشة المبيعات (قريباً)', style: TextStyle(fontSize: 24, color: AppTheme.primaryColor))), // (Index 2)
+    const SalesPage(), // شاشة المبيعات (Index 2)
   ];
 
   @override

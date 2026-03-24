@@ -135,6 +135,53 @@ class _PosPageState extends State<PosPage> {
     }
   }
 
+  // إتمام عملية البيع (دفع): حفظ + تخفيض المخزون + عرض النتيجة
+  Future<void> _completeSale() async {
+    if (_cart.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تأكيد عملية البيع', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(
+          'المجموع: $_totalAmount دينار\nعدد القطع: ${_cart.fold<int>(0, (s, i) => s + (i['quantity'] as int))}',
+          style: const TextStyle(fontSize: 16),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('تأكيد الدفع'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final saleId = await DatabaseHelper.instance.completeSale(_cart);
+    if (saleId > 0 && mounted) {
+      final totalAmount = _totalAmount;
+      final totalProfit = _cart.fold<int>(0, (s, i) {
+        final p = i['product'] as ProductModel;
+        return s + (p.profit * (i['quantity'] as int));
+      });
+      setState(() => _cart.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تم البيع بنجاح ✓  |  المبلغ: $totalAmount د  |  الربح: $totalProfit د'),
+          backgroundColor: AppTheme.successColor,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('حدث خطأ أثناء إتمام البيع!'), backgroundColor: AppTheme.errorColor),
+      );
+    }
+    _keepFocus();
+  }
+
   // عرض الفواتير المعلقة واستئنافها
   Future<void> _showSuspendedOrders() async {
     final orders = await DatabaseHelper.instance.getSuspendedOrders();
@@ -389,9 +436,7 @@ class _PosPageState extends State<PosPage> {
                           style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
                           icon: const Icon(Icons.print),
                           label: const Text('دفع وطباعة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                          onPressed: () {
-                            // لوجك الدفع وتخفيض الكمية (Stock) من القاعدة
-                          },
+                          onPressed: _cart.isEmpty ? null : _completeSale,
                         ),
                       ),
                     ],

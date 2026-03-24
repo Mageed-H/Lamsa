@@ -7,6 +7,8 @@ class CustomTextField extends StatelessWidget {
   final TextInputType keyboardType;
   final String? Function(String?)? validator;
   final IconData? icon;
+  final FocusNode? focusNode;
+  final void Function(String)? onSubmitted;
 
   const CustomTextField({
     Key? key,
@@ -15,6 +17,8 @@ class CustomTextField extends StatelessWidget {
     this.keyboardType = TextInputType.text,
     this.validator,
     this.icon,
+    this.focusNode,
+    this.onSubmitted,
   }) : super(key: key);
 
   @override
@@ -25,6 +29,8 @@ class CustomTextField extends StatelessWidget {
         controller: controller,
         keyboardType: keyboardType,
         validator: validator,
+        focusNode: focusNode,
+        onFieldSubmitted: onSubmitted,
         decoration: InputDecoration(
           labelText: label,
           labelStyle: const TextStyle(color: AppTheme.textSecondary),

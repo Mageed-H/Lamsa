@@ -20,7 +20,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2, // رفعنا الإصدار إلى 2
+      version: 5, // الإصدار 5: جداول المبيعات (sales, sale_items)
       onConfigure: _onConfigure, // تفعيل العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -42,6 +42,7 @@ class DatabaseHelper {
         color TEXT,
         size TEXT,
         price INTEGER NOT NULL,
+        purchase_price INTEGER NOT NULL DEFAULT 0,
         stock INTEGER NOT NULL DEFAULT 0,
         barcode TEXT,
         is_custom_barcode INTEGER DEFAULT 0
@@ -51,13 +52,42 @@ class DatabaseHelper {
 
     // إذا كان الإصدار الأول هو نفسه الأخير (تثبيت جديد)، ننشئ الجداول الجديدة فوراً
     await _createV2Tables(db);
+    await _createV4Tables(db);
+    await _createV5Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // إذا كان المستخدم عنده الإصدار 1، راح تتنفذ هاي الدالة وتضيف الجداول بدون ما تحذف المنتجات القديمة
       await _createV2Tables(db);
     }
+    if (oldVersion < 3) {
+      // إضافة عمود سعر الشراء بدون حذف البيانات القديمة
+      await db.execute('ALTER TABLE products ADD COLUMN purchase_price INTEGER NOT NULL DEFAULT 0');
+    }
+    if (oldVersion < 4) {
+      await _createV4Tables(db);
+      // نقل الباركودات الموجودة في جدول products إلى الجدول الجديد
+      await db.execute('''
+        INSERT OR IGNORE INTO product_barcodes (product_id, barcode)
+        SELECT id, barcode FROM products WHERE barcode IS NOT NULL AND barcode != ''
+      ''');
+    }
+    if (oldVersion < 5) {
+      await _createV5Tables(db);
+    }
+  }
+
+  Future _createV4Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS product_barcodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        barcode TEXT NOT NULL UNIQUE,
+        FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_pb_barcode ON product_barcodes (barcode);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_pb_product ON product_barcodes (product_id);');
   }
 
   // دالة مساعدة لإنشاء جداول التحديث الجديد (الإصدار 2)
@@ -97,6 +127,53 @@ class DatabaseHelper {
     ''');
   }
 
+  // ============================================================
+  // دوال إدارة الباركودات المتعددة (product_barcodes)
+  // ============================================================
+  Future<List<Map<String, dynamic>>> getBarcodesForProduct(int productId) async {
+    try {
+      final db = await instance.database;
+      return await db.query('product_barcodes',
+          where: 'product_id = ?', whereArgs: [productId], orderBy: 'id ASC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<int> addBarcode(int productId, String barcode) async {
+    try {
+      final db = await instance.database;
+      return await db.insert('product_barcodes', {
+        'product_id': productId,
+        'barcode': barcode,
+      }, conflictAlgorithm: ConflictAlgorithm.fail);
+    } catch (e) {
+      print('Error adding barcode: $e');
+      return -1;
+    }
+  }
+
+  Future<int> updateBarcode(int barcodeId, String newBarcode) async {
+    try {
+      final db = await instance.database;
+      return await db.update('product_barcodes', {'barcode': newBarcode},
+          where: 'id = ?', whereArgs: [barcodeId]);
+    } catch (e) {
+      print('Error updating barcode: $e');
+      return -1;
+    }
+  }
+
+  Future<int> removeBarcode(int barcodeId) async {
+    try {
+      final db = await instance.database;
+      return await db.delete('product_barcodes',
+          where: 'id = ?', whereArgs: [barcodeId]);
+    } catch (e) {
+      return 0;
+    }
+  }
+
   Future close() async {
     final db = await instance.database;
     db.close();
@@ -108,10 +185,21 @@ class DatabaseHelper {
   Future<int> insertProduct(ProductModel product) async {
     try {
       final db = await instance.database;
-      return await db.insert('products', product.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+      int productId = -1;
+      await db.transaction((txn) async {
+        productId = await txn.insert('products', product.toMap(),
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        if (product.barcode.isNotEmpty) {
+          await txn.insert('product_barcodes', {
+            'product_id': productId,
+            'barcode': product.barcode,
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
+      });
+      return productId;
     } catch (e) {
-      print('Error inserting product: $e'); 
-      return -1; 
+      print('Error inserting product: $e');
+      return -1;
     }
   }
 
@@ -129,9 +217,14 @@ class DatabaseHelper {
   Future<ProductModel?> getProductByBarcode(String barcode) async {
     try {
       final db = await instance.database;
-      final maps = await db.query('products', where: 'barcode = ?', whereArgs: [barcode]);
+      final maps = await db.rawQuery('''
+        SELECT p.* FROM products p
+        INNER JOIN product_barcodes pb ON pb.product_id = p.id
+        WHERE pb.barcode = ?
+        LIMIT 1
+      ''', [barcode]);
       if (maps.isNotEmpty) return ProductModel.fromMap(maps.first);
-      return null; 
+      return null;
     } catch (e) {
       print('Error fetching product by barcode: $e');
       return null;
@@ -169,6 +262,239 @@ class DatabaseHelper {
     } catch (e) {
       print('Error fetching categories: $e');
       return [];
+    }
+  }
+
+  // ==========================================================
+  // دوال مساعدة للباركود والحذف
+  // ==========================================================
+  Future<bool> barcodeExists(String barcode) async {
+    if (barcode.isEmpty) return false;
+    try {
+      final db = await instance.database;
+      final result = await db.query('product_barcodes',
+          where: 'barcode = ?', whereArgs: [barcode], limit: 1);
+      return result.isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<int> deleteProduct(int id) async {
+    try {
+      final db = await instance.database;
+      return await db.delete('products', where: 'id = ?', whereArgs: [id]);
+    } catch (e) {
+      print('Error deleting product: $e');
+      return 0;
+    }
+  }
+
+  // ==========================================================
+  // دوال الفواتير المعلقة (Suspended Orders)
+  // ==========================================================
+  Future<int> saveSuspendedOrder(List<Map<String, dynamic>> cart, String note) async {
+    final db = await instance.database;
+    int orderId = -1;
+    await db.transaction((txn) async {
+      orderId = await txn.insert('suspended_orders', {
+        'note': note.trim().isEmpty ? null : note.trim(),
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      for (final item in cart) {
+        final product = item['product'] as ProductModel;
+        await txn.insert('suspended_order_items', {
+          'order_id': orderId,
+          'product_id': product.id,
+          'quantity': item['quantity'] as int,
+          'unit_price': product.price,
+        });
+      }
+    });
+    return orderId;
+  }
+
+  Future<List<Map<String, dynamic>>> getSuspendedOrders() async {
+    try {
+      final db = await instance.database;
+      return await db.query('suspended_orders', orderBy: 'created_at DESC');
+    } catch (e) {
+      print('Error fetching suspended orders: $e');
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getSuspendedOrderCart(int orderId) async {
+    try {
+      final db = await instance.database;
+      final items = await db.query('suspended_order_items',
+          where: 'order_id = ?', whereArgs: [orderId]);
+      final List<Map<String, dynamic>> cart = [];
+      for (final item in items) {
+        final productId = item['product_id'] as int;
+        final quantity = item['quantity'] as int;
+        final productMaps =
+            await db.query('products', where: 'id = ?', whereArgs: [productId]);
+        if (productMaps.isNotEmpty) {
+          cart.add({
+            'product': ProductModel.fromMap(productMaps.first),
+            'quantity': quantity,
+          });
+        }
+      }
+      return cart;
+    } catch (e) {
+      print('Error fetching suspended order cart: $e');
+      return [];
+    }
+  }
+
+  Future<void> deleteSuspendedOrder(int orderId) async {
+    try {
+      final db = await instance.database;
+      await db.delete('suspended_orders', where: 'id = ?', whereArgs: [orderId]);
+    } catch (e) {
+      print('Error deleting suspended order: $e');
+    }
+  }
+
+  // ==========================================================
+  // جداول المبيعات (v5)
+  // ==========================================================
+  Future _createV5Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sales (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        total_amount INTEGER NOT NULL,
+        total_profit INTEGER NOT NULL DEFAULT 0,
+        items_count INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sales_date ON sales (created_at);');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sale_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sale_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        unit_price INTEGER NOT NULL,
+        purchase_price INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  // ==========================================================
+  // دوال المبيعات (Sales)
+  // ==========================================================
+
+  /// إتمام عملية البيع: حفظ الفاتورة + تخفيض المخزون (Transactional)
+  Future<int> completeSale(List<Map<String, dynamic>> cart) async {
+    final db = await instance.database;
+    int saleId = -1;
+    await db.transaction((txn) async {
+      int totalAmount = 0;
+      int totalProfit = 0;
+      int itemsCount = 0;
+
+      for (final item in cart) {
+        final product = item['product'] as ProductModel;
+        final qty = item['quantity'] as int;
+        totalAmount += product.price * qty;
+        totalProfit += product.profit * qty;
+        itemsCount += qty;
+      }
+
+      saleId = await txn.insert('sales', {
+        'total_amount': totalAmount,
+        'total_profit': totalProfit,
+        'items_count': itemsCount,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      for (final item in cart) {
+        final product = item['product'] as ProductModel;
+        final qty = item['quantity'] as int;
+        await txn.insert('sale_items', {
+          'sale_id': saleId,
+          'product_id': product.id,
+          'product_name': product.name,
+          'quantity': qty,
+          'unit_price': product.price,
+          'purchase_price': product.purchasePrice,
+        });
+        // تخفيض المخزون
+        await txn.rawUpdate(
+          'UPDATE products SET stock = stock - ? WHERE id = ?',
+          [qty, product.id],
+        );
+      }
+    });
+    return saleId;
+  }
+
+  /// جلب كل المبيعات
+  Future<List<Map<String, dynamic>>> getAllSales() async {
+    try {
+      final db = await instance.database;
+      return await db.query('sales', orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// جلب مبيعات اليوم فقط
+  Future<List<Map<String, dynamic>>> getTodaySales() async {
+    try {
+      final db = await instance.database;
+      final today = DateTime.now().toIso8601String().substring(0, 10);
+      return await db.query('sales',
+          where: "created_at LIKE ?",
+          whereArgs: ['$today%'],
+          orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// جلب تفاصيل فاتورة معينة
+  Future<List<Map<String, dynamic>>> getSaleItems(int saleId) async {
+    try {
+      final db = await instance.database;
+      return await db.query('sale_items',
+          where: 'sale_id = ?', whereArgs: [saleId]);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// ملخص المبيعات (اليوم + الكل)
+  Future<Map<String, int>> getSalesSummary() async {
+    try {
+      final db = await instance.database;
+      final today = DateTime.now().toIso8601String().substring(0, 10);
+
+      final todayResult = await db.rawQuery(
+        "SELECT COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(total_profit), 0) as profit, COUNT(*) as count FROM sales WHERE created_at LIKE ?",
+        ['$today%'],
+      );
+      final allResult = await db.rawQuery(
+        'SELECT COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(total_profit), 0) as profit, COUNT(*) as count FROM sales',
+      );
+
+      return {
+        'today_revenue': todayResult.first['revenue'] as int? ?? 0,
+        'today_profit': todayResult.first['profit'] as int? ?? 0,
+        'today_count': todayResult.first['count'] as int? ?? 0,
+        'all_revenue': allResult.first['revenue'] as int? ?? 0,
+        'all_profit': allResult.first['profit'] as int? ?? 0,
+        'all_count': allResult.first['count'] as int? ?? 0,
+      };
+    } catch (e) {
+      return {'today_revenue': 0, 'today_profit': 0, 'today_count': 0, 'all_revenue': 0, 'all_profit': 0, 'all_count': 0};
     }
   }
 }
