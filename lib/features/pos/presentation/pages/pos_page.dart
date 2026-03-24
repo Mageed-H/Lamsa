@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:flutter/services.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:lamsa/core/database/database_helper.dart';
 import 'package:lamsa/core/theme/app_theme.dart';
 import 'package:lamsa/features/products/data/models/product_model.dart';
@@ -60,6 +64,27 @@ class _PosPageState extends State<PosPage> {
           _cart.add({'product': product, 'quantity': 1});
         }
       });
+
+      // فحص المخزون وتنبيه إذا كان قليلاً
+      final thresholdStr = await DatabaseHelper.instance.getSetting('low_stock_threshold', defaultValue: '5');
+      final threshold = int.tryParse(thresholdStr) ?? 5;
+      final totalInCart = _cart
+          .where((i) => (i['product'] as ProductModel).id == product.id)
+          .fold<int>(0, (s, i) => s + (i['quantity'] as int));
+      final remaining = product.stock - totalInCart;
+      if (remaining <= threshold && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              remaining <= 0
+                  ? '⚠️ تحذير: مخزون "${product.name}" نفد بالكامل!'
+                  : '⚠️ تنبيه: المخزون المتبقي من "${product.name}" = $remaining قطعة فقط!',
+            ),
+            backgroundColor: remaining <= 0 ? AppTheme.errorColor : AppTheme.warningColor,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     } else {
       // تطبيق Robustness: إذا الباركود غلط، ننبه الكاشير بدون ما يكرش النظام
       ScaffoldMessenger.of(context).showSnackBar(
@@ -135,51 +160,327 @@ class _PosPageState extends State<PosPage> {
     }
   }
 
-  // إتمام عملية البيع (دفع): حفظ + تخفيض المخزون + عرض النتيجة
-  Future<void> _completeSale() async {
+  // تقليل كمية منتج في السلة (أو حذفه إذا وصل لـ 0)
+  void _decreaseQty(int index) {
+    setState(() {
+      if ((_cart[index]['quantity'] as int) > 1) {
+        _cart[index]['quantity'] = (_cart[index]['quantity'] as int) - 1;
+      } else {
+        _cart.removeAt(index);
+      }
+    });
+    _keepFocus();
+  }
+
+  // زيادة كمية منتج في السلة
+  void _increaseQty(int index) {
+    setState(() {
+      _cart[index]['quantity'] = (_cart[index]['quantity'] as int) + 1;
+    });
+    _keepFocus();
+  }
+
+  // حوار الدفع: حساب الفكة + اختيار الطباعة
+  Future<void> _showPaymentDialog() async {
     if (_cart.isEmpty) return;
+
+    final total = _totalAmount;
+    final amountController = TextEditingController(text: '$total');
+    bool shouldPrint = true;
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('تأكيد عملية البيع', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text(
-          'المجموع: $_totalAmount دينار\nعدد القطع: ${_cart.fold<int>(0, (s, i) => s + (i['quantity'] as int))}',
-          style: const TextStyle(fontSize: 16),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('تأكيد الدفع'),
-          ),
-        ],
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final given = int.tryParse(amountController.text) ?? 0;
+          final change = (given - total).clamp(0, 9999999);
+          final canConfirm = given >= total;
+
+          return AlertDialog(
+            title: const Text('إتمام الدفع', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // المجموع الكلي
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('المجموع:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('$total دينار',
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // حقل المبلغ المعطى
+                TextField(
+                  controller: amountController,
+                  keyboardType: TextInputType.number,
+                  autofocus: true,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  decoration: const InputDecoration(
+                    labelText: 'المبلغ المعطى',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.payments),
+                  ),
+                  onChanged: (_) => setDialogState(() {}),
+                ),
+                const SizedBox(height: 12),
+                // الباقي (الفكة)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: canConfirm
+                        ? AppTheme.successColor.withValues(alpha: 0.12)
+                        : AppTheme.errorColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: canConfirm ? AppTheme.successColor : AppTheme.errorColor,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('الباقي (الفكة):', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      Text(
+                        canConfirm ? '$change دينار' : 'المبلغ غير كافٍ',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: canConfirm ? AppTheme.successColor : AppTheme.errorColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // خيار الطباعة
+                GestureDetector(
+                  onTap: () => setDialogState(() => shouldPrint = !shouldPrint),
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: shouldPrint,
+                        onChanged: (v) => setDialogState(() => shouldPrint = v ?? true),
+                        activeColor: AppTheme.primaryColor,
+                      ),
+                      const Icon(Icons.receipt_long, size: 18, color: AppTheme.textSecondary),
+                      const SizedBox(width: 4),
+                      const Text('طباعة فاتورة', style: TextStyle(fontSize: 15)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('إلغاء'),
+              ),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: canConfirm ? AppTheme.successColor : AppTheme.neutralColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                onPressed: canConfirm ? () => Navigator.pop(ctx, true) : null,
+                icon: const Icon(Icons.check_circle),
+                label: const Text('تأكيد الدفع', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
       ),
     );
-    if (confirmed != true) return;
 
+    if (confirmed != true) {
+      amountController.dispose();
+      _keepFocus();
+      return;
+    }
+
+    final int given = int.tryParse(amountController.text) ?? total;
+    final int changeAmount = (given - total).clamp(0, 9999999);
+    amountController.dispose();
+
+    final cartSnapshot = List<Map<String, dynamic>>.from(_cart);
     final saleId = await DatabaseHelper.instance.completeSale(_cart);
+
     if (saleId > 0 && mounted) {
-      final totalAmount = _totalAmount;
-      final totalProfit = _cart.fold<int>(0, (s, i) {
+      final totalProfit = cartSnapshot.fold<int>(0, (s, i) {
         final p = i['product'] as ProductModel;
         return s + (p.profit * (i['quantity'] as int));
       });
       setState(() => _cart.clear());
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('تم البيع بنجاح ✓  |  المبلغ: $totalAmount د  |  الربح: $totalProfit د'),
-          backgroundColor: AppTheme.successColor,
-          duration: const Duration(seconds: 3),
-        ),
-      );
+
+      if (shouldPrint) {
+        await _printInvoice(cartSnapshot, total, given, changeAmount);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'تم البيع بنجاح ✓  |  الربح: $totalProfit د'
+              '${changeAmount > 0 ? '  |  الباقي: $changeAmount د' : ''}',
+            ),
+            backgroundColor: AppTheme.successColor,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('حدث خطأ أثناء إتمام البيع!'), backgroundColor: AppTheme.errorColor),
+        const SnackBar(
+          content: Text('حدث خطأ أثناء إتمام البيع!'),
+          backgroundColor: AppTheme.errorColor,
+        ),
       );
     }
     _keepFocus();
+  }
+
+  // طباعة فاتورة البيع كـ PDF
+  Future<void> _printInvoice(
+    List<Map<String, dynamic>> cart,
+    int total,
+    int given,
+    int change,
+  ) async {
+    final settings = await DatabaseHelper.instance.getAllSettings();
+    final storeName = settings['store_name'] ?? 'لمسة';
+    final storePhone = settings['store_phone'] ?? '';
+    final currency = settings['currency'] ?? 'دينار';
+    final footer = settings['receipt_footer'] ?? 'شكراً لزيارتكم';
+
+    final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
+    final arabicFont = pw.Font.ttf(fontData);
+
+    final now = DateTime.now();
+    final dateStr =
+        '${now.year}/${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')}';
+    final timeStr =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+    final itemCount = cart.fold<int>(0, (s, i) => s + (i['quantity'] as int));
+    // ارتفاع تقريبي للفاتورة بناءً على عدد المنتجات
+    final pageHeight = (80 + cart.length * 18 + 80).toDouble() * PdfPageFormat.mm;
+    final pageFormat = PdfPageFormat(
+      78 * PdfPageFormat.mm,
+      pageHeight,
+      marginAll: 4 * PdfPageFormat.mm,
+    );
+
+    final doc = pw.Document();
+    doc.addPage(
+      pw.Page(
+        pageFormat: pageFormat,
+        textDirection: pw.TextDirection.rtl,
+        build: (context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            // اسم المحل
+            pw.Text(
+              storeName,
+              style: pw.TextStyle(fontSize: 14, font: arabicFont, fontWeight: pw.FontWeight.bold),
+              textDirection: pw.TextDirection.rtl,
+            ),
+            if (storePhone.isNotEmpty)
+              pw.Text(
+                storePhone,
+                style: pw.TextStyle(fontSize: 9, font: arabicFont),
+                textDirection: pw.TextDirection.rtl,
+              ),
+            pw.SizedBox(height: 4),
+            pw.Divider(thickness: 0.5),
+            // التاريخ والوقت
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(timeStr, style: pw.TextStyle(fontSize: 8, font: arabicFont)),
+                pw.Text(dateStr, style: pw.TextStyle(fontSize: 8, font: arabicFont)),
+              ],
+            ),
+            pw.Divider(thickness: 0.5),
+            pw.SizedBox(height: 2),
+            // المنتجات
+            ...cart.map((item) {
+              final product = item['product'] as ProductModel;
+              final qty = item['quantity'] as int;
+              final subtotal = product.price * qty;
+              return pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(vertical: 2),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      '$subtotal $currency',
+                      style: pw.TextStyle(fontSize: 9, font: arabicFont),
+                    ),
+                    pw.Expanded(
+                      child: pw.Text(
+                        '${product.name}  x$qty',
+                        style: pw.TextStyle(fontSize: 9, font: arabicFont),
+                        textDirection: pw.TextDirection.rtl,
+                        textAlign: pw.TextAlign.right,
+                        overflow: pw.TextOverflow.clip,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            pw.SizedBox(height: 4),
+            pw.Divider(thickness: 0.8),
+            // المجموع
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  '$total $currency',
+                  style: pw.TextStyle(fontSize: 13, font: arabicFont, fontWeight: pw.FontWeight.bold),
+                ),
+                pw.Text(
+                  'المجموع ($itemCount قطعة):',
+                  style: pw.TextStyle(fontSize: 11, font: arabicFont, fontWeight: pw.FontWeight.bold),
+                  textDirection: pw.TextDirection.rtl,
+                ),
+              ],
+            ),
+            // المدفوع والباقي (إذا دفع أكثر)
+            if (given > total) ...([
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('$given $currency', style: pw.TextStyle(fontSize: 10, font: arabicFont)),
+                  pw.Text('المدفوع:', style: pw.TextStyle(fontSize: 10, font: arabicFont), textDirection: pw.TextDirection.rtl),
+                ],
+              ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('$change $currency',
+                      style: pw.TextStyle(fontSize: 11, font: arabicFont, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('الباقي:', style: pw.TextStyle(fontSize: 11, font: arabicFont, fontWeight: pw.FontWeight.bold), textDirection: pw.TextDirection.rtl),
+                ],
+              ),
+            ]),
+            pw.Divider(thickness: 0.5),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              footer,
+              style: pw.TextStyle(fontSize: 10, font: arabicFont),
+              textDirection: pw.TextDirection.rtl,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (_) => doc.save());
   }
 
   // عرض الفواتير المعلقة واستئنافها
@@ -367,19 +668,43 @@ class _PosPageState extends State<PosPage> {
                           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                           child: ListTile(
                             title: Text(product.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text('${product.price} دينار | القياس: ${product.size} | اللون: ${product.color}'),
+                            subtitle: Text('${product.price} دينار | ${product.price * qty} إجمالي'),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text('x$qty', style: const TextStyle(fontSize: 18, color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+                                // زر تقليل الكمية
                                 IconButton(
-                                  icon: const Icon(Icons.delete, color: AppTheme.errorColor),
+                                  icon: const Icon(Icons.remove_circle, color: AppTheme.warningColor, size: 26),
+                                  onPressed: () => _decreaseQty(index),
+                                  tooltip: 'تقليل',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                                // عرض الكمية
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  child: Text(
+                                    '$qty',
+                                    style: const TextStyle(fontSize: 20, color: AppTheme.primaryColor, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                // زر زيادة الكمية
+                                IconButton(
+                                  icon: const Icon(Icons.add_circle, color: AppTheme.successColor, size: 26),
+                                  onPressed: () => _increaseQty(index),
+                                  tooltip: 'زيادة',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                                const SizedBox(width: 6),
+                                // زر حذف
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
                                   onPressed: () {
-                                    setState(() {
-                                      _cart.removeAt(index);
-                                      _keepFocus();
-                                    });
+                                    setState(() => _cart.removeAt(index));
+                                    _keepFocus();
                                   },
+                                  tooltip: 'حذف',
                                 ),
                               ],
                             ),
@@ -436,7 +761,7 @@ class _PosPageState extends State<PosPage> {
                           style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
                           icon: const Icon(Icons.print),
                           label: const Text('دفع وطباعة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                          onPressed: _cart.isEmpty ? null : _completeSale,
+                          onPressed: _cart.isEmpty ? null : _showPaymentDialog,
                         ),
                       ),
                     ],
