@@ -20,7 +20,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 5, // الإصدار 5: جداول المبيعات (sales, sale_items)
+      version: 6, // الإصدار 6: جدول الإعدادات (settings)
       onConfigure: _onConfigure, // تفعيل العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -54,6 +54,7 @@ class DatabaseHelper {
     await _createV2Tables(db);
     await _createV4Tables(db);
     await _createV5Tables(db);
+    await _createV6Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -74,6 +75,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 5) {
       await _createV5Tables(db);
+    }
+    if (oldVersion < 6) {
+      await _createV6Tables(db);
     }
   }
 
@@ -526,6 +530,69 @@ class DatabaseHelper {
       };
     } catch (e) {
       return {'revenue': 0, 'profit': 0, 'count': 0};
+    }
+  }
+
+  // ==========================================================
+  // جدول الإعدادات (v6)
+  // ==========================================================
+  Future _createV6Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    ''');
+    // القيم الافتراضية
+    final defaults = {
+      'store_name': 'لمسة',
+      'store_phone': '',
+      'currency': 'دينار',
+      'low_stock_threshold': '5',
+      'default_barcode_copies': '1',
+      'receipt_footer': 'شكراً لزيارتكم',
+    };
+    for (final entry in defaults.entries) {
+      await db.insert('settings', {'key': entry.key, 'value': entry.value},
+          conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+  }
+
+  // ==========================================================
+  // دوال الإعدادات (Settings CRUD)
+  // ==========================================================
+
+  /// جلب قيمة إعداد معين (مع قيمة افتراضية إذا لم يوجد)
+  Future<String> getSetting(String key, {String defaultValue = ''}) async {
+    try {
+      final db = await instance.database;
+      final result = await db.query('settings', where: 'key = ?', whereArgs: [key], limit: 1);
+      if (result.isNotEmpty) return result.first['value'] as String;
+      return defaultValue;
+    } catch (e) {
+      return defaultValue;
+    }
+  }
+
+  /// حفظ قيمة إعداد (INSERT OR REPLACE)
+  Future<void> setSetting(String key, String value) async {
+    try {
+      final db = await instance.database;
+      await db.insert('settings', {'key': key, 'value': value},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    } catch (e) {
+      print('Error saving setting $key: $e');
+    }
+  }
+
+  /// جلب كل الإعدادات كـ Map
+  Future<Map<String, String>> getAllSettings() async {
+    try {
+      final db = await instance.database;
+      final rows = await db.query('settings');
+      return {for (final r in rows) r['key'] as String: r['value'] as String};
+    } catch (e) {
+      return {};
     }
   }
 }
