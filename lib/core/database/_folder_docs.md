@@ -3,31 +3,34 @@
 ## File: database_helper.dart
 
 ### Class: DatabaseHelper
-Singleton pattern implementation for SQLite database management.
+Singleton pattern for SQLite database management. **Schema Version: 4**.
 
-#### Key Components:
-- Line 5-8: Singleton instance setup and private constructor
-- Line 11-16: Database getter with lazy initialization
-- Line 18-28: Database initialization with version management
-- Line 31-33: Foreign key configuration
-- Line 35-50: Initial database creation (v1)
-  - Products table with indexed barcode field
-- Line 52-57: Database upgrade handling
-- Line 60-95: Version 2 schema updates
-  - Categories table creation
-  - Suspended orders system
-  - Order items with foreign key constraints
-- Line 97+: Database cleanup and closing
+#### Security:
+- All queries parameterized (no SQL injection)
+- Foreign keys enforced (`PRAGMA foreign_keys = ON`)
+- Financial fields use `INTEGER` (never `double`)
 
-### Database Schema
-1. Products Table (v1):
-   - Primary fields: id, name, category, price
-   - Optional fields: color, size, barcode
-   - Performance: Indexed barcode field
+#### Schema (v4):
+1. **products** — id, name, category, price (INT), purchase_price (INT), color, size, stock, barcode (legacy)
+2. **categories** — id, name (UNIQUE)
+3. **suspended_orders** — id, note, created_at
+4. **suspended_order_items** — id, order_id FK→suspended_orders ON DELETE CASCADE, product_id, quantity
+5. **product_barcodes** (v4) — id, product_id FK→products ON DELETE CASCADE, barcode (UNIQUE)
 
-2. Categories Table (v2):
-   - Simple structure: id, name
-   - Unique constraint on name
+#### Key Methods:
+- `insertProduct()` — Transactional: inserts product + barcodes
+- `getProductByBarcode()` — JOIN query on product_barcodes
+- `barcodeExists()` — Checks uniqueness in product_barcodes
+- `getBarcodesForProduct()`, `addBarcode()`, `updateBarcode()`, `removeBarcode()`
+- `saveSuspendedOrder()`, `getSuspendedOrders()`, `getSuspendedOrderCart()`, `deleteSuspendedOrder()`
+- `getAllProducts()`, `updateProduct()`, `deleteProduct()`
+- `getAllCategories()`, `insertCategory()`
+
+#### Migration History:
+- v1: products table
+- v2: categories, suspended_orders, suspended_order_items
+- v3: purchase_price column added to products
+- v4: product_barcodes table + data migration from products.barcode
 
 3. Suspended Orders System (v2):
    - Main order table with notes

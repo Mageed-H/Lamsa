@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:lamsa/core/database/database_helper.dart';
 import 'package:lamsa/core/theme/app_theme.dart';
 import 'package:lamsa/features/products/data/models/product_model.dart';
@@ -16,7 +19,8 @@ class _PosPageState extends State<PosPage> {
   final FocusNode _barcodeFocusNode = FocusNode();
 
   // سلة المشتريات (الفاتورة الحالية): نحفظ بيها المنتج والكمية
-  List<Map<String, dynamic>> _cart = [];
+  final List<Map<String, dynamic>> _cart = [];
+  bool _hasSuspendedOrders = false;
 
   @override
   void initState() {
@@ -24,6 +28,7 @@ class _PosPageState extends State<PosPage> {
     // أول ما تفتح الشاشة، نخلي التركيز تلقائياً على حقل الباركود
     WidgetsBinding.instance.addPostFrameCallback((_) {
       FocusScope.of(context).requestFocus(_barcodeFocusNode);
+      _checkSuspendedOrders();
     });
   }
 
@@ -76,6 +81,161 @@ class _PosPageState extends State<PosPage> {
     FocusScope.of(context).requestFocus(_barcodeFocusNode);
   }
 
+  Future<void> _checkSuspendedOrders() async {
+    final orders = await DatabaseHelper.instance.getSuspendedOrders();
+    if (mounted) setState(() => _hasSuspendedOrders = orders.isNotEmpty);
+  }
+
+  // تعليق الفاتورة وحفظها في القاعدة
+  Future<void> _suspendOrder() async {
+    if (_cart.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('الفاتورة فارغة، لا يوجد ما يُعلّق!')),
+      );
+      return;
+    }
+    final noteController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تعليق الفاتورة', style: TextStyle(color: AppTheme.warningColor)),
+        content: TextField(
+          controller: noteController,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'ملاحظة اختيارية (مثال: زبونة بالباب)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.warningColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('تعليق'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await DatabaseHelper.instance.saveSuspendedOrder(_cart, noteController.text);
+      setState(() {
+        _cart.clear();
+        _hasSuspendedOrders = true;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم تعليق الفاتورة بنجاح ✓'),
+            backgroundColor: AppTheme.warningColor,
+          ),
+        );
+      }
+      _keepFocus();
+    }
+  }
+
+  // عرض الفواتير المعلقة واستئنافها
+  Future<void> _showSuspendedOrders() async {
+    final orders = await DatabaseHelper.instance.getSuspendedOrders();
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, scrollCtrl) => Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              child: const Text('الفواتير المعلقة',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+            ),
+            Expanded(
+              child: orders.isEmpty
+                  ? const Center(child: Text('لا توجد فواتير معلقة'))
+                  : ListView.builder(
+                      controller: scrollCtrl,
+                      itemCount: orders.length,
+                      itemBuilder: (_, i) {
+                        final order = orders[i];
+                        final orderId = order['id'] as int;
+                        final note = order['note'] as String? ?? 'بدون ملاحظة';
+                        final createdAt = (order['created_at'] as String).substring(0, 16).replaceAll('T', '  ');
+                        return Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          child: ListTile(
+                            leading: const Icon(Icons.pause_circle, color: AppTheme.warningColor, size: 32),
+                            title: Text(note, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text(createdAt),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                TextButton(
+                                  onPressed: () async {
+                                    final suspendedCart = await DatabaseHelper.instance.getSuspendedOrderCart(orderId);
+                                    await DatabaseHelper.instance.deleteSuspendedOrder(orderId);
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                    setState(() => _cart.addAll(suspendedCart));
+                                    _checkSuspendedOrders();
+                                    _keepFocus();
+                                  },
+                                  child: const Text('استئناف', style: TextStyle(color: AppTheme.successColor, fontWeight: FontWeight.bold)),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete, color: AppTheme.errorColor),
+                                  onPressed: () async {
+                                    await DatabaseHelper.instance.deleteSuspendedOrder(orderId);
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                    _checkSuspendedOrders();
+                                    _showSuspendedOrders();
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+    _checkSuspendedOrders();
+  }
+
+  // سكانر الكاميرا (على الموبايل فقط)
+  Future<void> _openCameraScanner() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => Scaffold(
+          appBar: AppBar(
+            title: const Text('امسح الباركود'),
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+          ),
+          body: MobileScanner(
+            onDetect: (capture) {
+              if (capture.barcodes.isNotEmpty) {
+                final code = capture.barcodes.first.rawValue;
+                if (code != null) {
+                  Navigator.pop(ctx);
+                  _onBarcodeScanned(code);
+                }
+              }
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   // حساب المجموع الكلي الدقيق للفاتورة (Financial Precision)
   int get _totalAmount {
     return _cart.fold(0, (sum, item) {
@@ -90,6 +250,35 @@ class _PosPageState extends State<PosPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('نقطة البيع (الكاشير)', style: TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          // زر الفواتير المعلقة مع نقطة حمراء دليل
+          IconButton(
+            icon: Stack(
+              children: [
+                const Icon(Icons.pause_circle_outline),
+                if (_hasSuspendedOrders)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(color: AppTheme.errorColor, shape: BoxShape.circle),
+                    ),
+                  ),
+              ],
+            ),
+            onPressed: _showSuspendedOrders,
+            tooltip: 'الفواتير المعلقة',
+          ),
+          // زر الكاميرا يظهر على الموبايل فقط
+          if (!kIsWeb && (Platform.isAndroid || Platform.isIOS))
+            IconButton(
+              icon: const Icon(Icons.camera_alt),
+              onPressed: _openCameraScanner,
+              tooltip: 'مسح بالكاميرا',
+            ),
+        ],
       ),
       // نستخدم GestureDetector حتى إذا الكاشير لمس الشاشة بالغلط، يرجع التركيز للباركود
       body: GestureDetector(
@@ -187,19 +376,17 @@ class _PosPageState extends State<PosPage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.warningColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
                           icon: const Icon(Icons.pause_circle_filled),
                           label: const Text('تعليق', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                          onPressed: () {
-                            // سيتم ربطها بجدول suspended_orders لاحقاً
-                          },
+                          onPressed: _suspendOrder,
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         flex: 2,
                         child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
                           icon: const Icon(Icons.print),
                           label: const Text('دفع وطباعة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                           onPressed: () {

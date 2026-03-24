@@ -3,8 +3,10 @@
 ## Files Overview
 
 ### custom_button.dart
-Reusable button component with consistent styling.
+- `CustomButton` — Reusable button with icon, label, `Flexible` wrapping to prevent overflow. Uses `mainAxisSize: MainAxisSize.min`.
 
 ### custom_text_field.dart
-Standardized text input field with shared validation and styling.
-* **`main_layout.dart`**: The primary application shell. Implements a `BottomNavigationBar` for routing and utilizes `IndexedStack` to preserve the state of child pages (e.g., keeping the POS cart active while browsing the inventory).
+- `CustomTextField` — Standardized text input field with styling, validation, optional `focusNode` and `onSubmitted` support for scanner integration.
+
+### main_layout.dart
+- `MainLayout` — The primary application shell. Implements `BottomNavigationBar` for routing with `IndexedStack` to preserve child page state (e.g., keeping POS cart active while browsing inventory).

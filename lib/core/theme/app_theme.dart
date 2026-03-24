@@ -9,6 +9,12 @@ class AppTheme {
   static const Color textPrimary = Color(0xFF212121); // أسود داكن للنصوص
   static const Color textSecondary = Color(0xFF757575); // رصاصي للنصوص الثانوية
   static const Color errorColor = Color(0xFFD32F2F); // أحمر للأخطاء والحذف
+  static const Color successColor = Color(0xFF388E3C); // أخضر للنجاح والأرباح
+  static const Color warningColor = Color(0xFFFF9800); // برتقالي للتحذيرات والتعليق
+  static const Color highlightColor = Color(0xFFFFF8E1); // أصفر فاتح للتحديد
+  static const Color searchFieldColor = Color(0xFFE3F2FD); // أزرق فاتح لحقل البحث
+  static const Color neutralColor = Color(0xFF9E9E9E); // رصاصي للعناصر المحايدة
+  static const Color neutralLightColor = Color(0xFFF5F5F5); // رصاصي فاتح للخلفيات
 
   // تعريف الـ ThemeData اللي راح نربطه بـ MaterialApp
   static ThemeData get lightTheme {
