@@ -33,8 +33,8 @@ class AppTheme {
         surface: surfaceColor,
         error: errorColor,
       ),
-      // إعدادات الخطوط (يفضل لاحقاً استخدام خط عربي مثل Cairo أو Tajawal)
-      fontFamily: 'Tahoma', // كمثال مؤقت
+      // خط Cairo العربي (مُضمّن محلياً مع التطبيق)
+      fontFamily: 'Cairo',
     );
   }
 }

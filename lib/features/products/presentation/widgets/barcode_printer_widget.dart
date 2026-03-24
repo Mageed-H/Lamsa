@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -92,9 +93,10 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   Future<void> _printBarcode() async {
     final pdfBarcodeType = _detectPdfBarcodeType();
 
-    // تحميل خط عربي من Google Fonts
-    final arabicFont = await PdfGoogleFonts.cairoRegular();
-    final arabicFontBold = await PdfGoogleFonts.cairoBold();
+    // تحميل خط عربي محلي (لا يحتاج إنترنت)
+    final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
+    final arabicFont = pw.Font.ttf(fontData);
+    final arabicFontBold = arabicFont;
 
     final doc = pw.Document();
 
