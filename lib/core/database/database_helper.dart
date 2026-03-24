@@ -1,10 +1,14 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import '../../features/products/data/models/product_model.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
+
+  /// يُستخدم لإشعار الصفحات بأي تغيير في البيانات (مبيعات، منتجات...)
+  static final ValueNotifier<int> revision = ValueNotifier(0);
 
   DatabaseHelper._init();
 
@@ -20,7 +24,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6, // الإصدار 6: جدول الإعدادات (settings)
+      version: 7, // الإصدار 7: إعدادات الطباعة (خط + عرض ورقة)
       onConfigure: _onConfigure, // تفعيل العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -55,6 +59,7 @@ class DatabaseHelper {
     await _createV4Tables(db);
     await _createV5Tables(db);
     await _createV6Tables(db);
+    await _createV7Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -78,6 +83,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 6) {
       await _createV6Tables(db);
+    }
+    if (oldVersion < 7) {
+      await _createV7Tables(db);
     }
   }
 
@@ -200,6 +208,7 @@ class DatabaseHelper {
           }, conflictAlgorithm: ConflictAlgorithm.ignore);
         }
       });
+      if (productId > 0) revision.value++;
       return productId;
     } catch (e) {
       print('Error inserting product: $e');
@@ -238,7 +247,9 @@ class DatabaseHelper {
   Future<int> updateProduct(ProductModel product) async {
     try {
       final db = await instance.database;
-      return await db.update('products', product.toMap(), where: 'id = ?', whereArgs: [product.id]);
+      final rows = await db.update('products', product.toMap(), where: 'id = ?', whereArgs: [product.id]);
+      if (rows > 0) revision.value++;
+      return rows;
     } catch (e) {
       print('Error updating product: $e');
       return 0; 
@@ -287,7 +298,9 @@ class DatabaseHelper {
   Future<int> deleteProduct(int id) async {
     try {
       final db = await instance.database;
-      return await db.delete('products', where: 'id = ?', whereArgs: [id]);
+      final rows = await db.delete('products', where: 'id = ?', whereArgs: [id]);
+      if (rows > 0) revision.value++;
+      return rows;
     } catch (e) {
       print('Error deleting product: $e');
       return 0;
@@ -437,6 +450,7 @@ class DatabaseHelper {
         );
       }
     });
+    if (saleId > 0) revision.value++;
     return saleId;
   }
 
@@ -556,6 +570,15 @@ class DatabaseHelper {
       await db.insert('settings', {'key': entry.key, 'value': entry.value},
           conflictAlgorithm: ConflictAlgorithm.ignore);
     }
+  }
+
+  Future _createV7Tables(Database db) async {
+    // إضافة إعدادات الطباعة الجديدة
+    final batch = db.batch();
+    batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_title_font_size', '14')");
+    batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_body_font_size', '9')");
+    batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_paper_width_mm', '78')");
+    await batch.commit(noResult: true);
   }
 
   // ==========================================================

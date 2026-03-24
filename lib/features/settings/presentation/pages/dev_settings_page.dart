@@ -23,6 +23,10 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
   final _lowStockCtrl = TextEditingController();
   final _defaultCopiesCtrl = TextEditingController();
   final _receiptFooterCtrl = TextEditingController();
+  // إعدادات الطباعة
+  final _titleFontCtrl = TextEditingController();
+  final _bodyFontCtrl = TextEditingController();
+  final _paperWidthCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -38,6 +42,9 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
     _lowStockCtrl.dispose();
     _defaultCopiesCtrl.dispose();
     _receiptFooterCtrl.dispose();
+    _titleFontCtrl.dispose();
+    _bodyFontCtrl.dispose();
+    _paperWidthCtrl.dispose();
     super.dispose();
   }
 
@@ -51,6 +58,9 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       _lowStockCtrl.text = settings['low_stock_threshold'] ?? '5';
       _defaultCopiesCtrl.text = settings['default_barcode_copies'] ?? '1';
       _receiptFooterCtrl.text = settings['receipt_footer'] ?? 'شكراً لزيارتكم';
+      _titleFontCtrl.text = settings['receipt_title_font_size'] ?? '14';
+      _bodyFontCtrl.text = settings['receipt_body_font_size'] ?? '9';
+      _paperWidthCtrl.text = settings['receipt_paper_width_mm'] ?? '78';
       _isLoading = false;
     });
   }
@@ -66,6 +76,9 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       DatabaseHelper.instance.setSetting('low_stock_threshold', _lowStockCtrl.text.trim()),
       DatabaseHelper.instance.setSetting('default_barcode_copies', _defaultCopiesCtrl.text.trim()),
       DatabaseHelper.instance.setSetting('receipt_footer', _receiptFooterCtrl.text.trim()),
+      DatabaseHelper.instance.setSetting('receipt_title_font_size', _titleFontCtrl.text.trim()),
+      DatabaseHelper.instance.setSetting('receipt_body_font_size', _bodyFontCtrl.text.trim()),
+      DatabaseHelper.instance.setSetting('receipt_paper_width_mm', _paperWidthCtrl.text.trim()),
     ]);
 
     if (!mounted) return;
@@ -163,6 +176,42 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                     hint: 'مثال: شكراً لزيارتكم',
                     icon: Icons.receipt_long,
                     maxLines: 2,
+                  ),
+                  _buildSettingField(
+                    controller: _titleFontCtrl,
+                    label: 'حجم خط العنوان (اسم المحل / الإجمالي)',
+                    hint: 'افتراضي: 14',
+                    icon: Icons.format_size,
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      final n = double.tryParse(v ?? '');
+                      if (n == null || n < 6 || n > 30) return 'أدخل رقماً بين 6 و 30';
+                      return null;
+                    },
+                  ),
+                  _buildSettingField(
+                    controller: _bodyFontCtrl,
+                    label: 'حجم خط بنود الفاتورة',
+                    hint: 'افتراضي: 9',
+                    icon: Icons.text_fields,
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      final n = double.tryParse(v ?? '');
+                      if (n == null || n < 5 || n > 20) return 'أدخل رقماً بين 5 و 20';
+                      return null;
+                    },
+                  ),
+                  _buildSettingField(
+                    controller: _paperWidthCtrl,
+                    label: 'عرض ورقة الطباعة (ملم)',
+                    hint: 'مثال: 78 (للثيرمال) أو 80',
+                    icon: Icons.straighten,
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      final n = double.tryParse(v ?? '');
+                      if (n == null || n < 50 || n > 210) return 'أدخل عرضاً بين 50 و 210 ملم';
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 32),
                   SizedBox(

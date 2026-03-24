@@ -25,19 +25,27 @@ class _PosPageState extends State<PosPage> {
   // سلة المشتريات (الفاتورة الحالية): نحفظ بيها المنتج والكمية
   final List<Map<String, dynamic>> _cart = [];
   bool _hasSuspendedOrders = false;
+  // قائمة جميع المنتجات (للبحث)
+  List<ProductModel> _allProducts = [];
+  // الخصم
+  int _discountAmount = 0;
+  bool _isDiscountPercent = false;
 
   @override
   void initState() {
     super.initState();
+    DatabaseHelper.revision.addListener(_loadAllProducts);
     // أول ما تفتح الشاشة، نخلي التركيز تلقائياً على حقل الباركود
     WidgetsBinding.instance.addPostFrameCallback((_) {
       FocusScope.of(context).requestFocus(_barcodeFocusNode);
       _checkSuspendedOrders();
+      _loadAllProducts();
     });
   }
 
   @override
   void dispose() {
+    DatabaseHelper.revision.removeListener(_loadAllProducts);
     _barcodeController.dispose();
     _barcodeFocusNode.dispose();
     super.dispose();
@@ -54,6 +62,24 @@ class _PosPageState extends State<PosPage> {
     final product = await DatabaseHelper.instance.getProductByBarcode(barcode.trim());
 
     if (product != null) {
+      // فحص المخزون قبل الإضافة
+      final int currentInCart = _cart
+          .where((i) => (i['product'] as ProductModel).id == product.id)
+          .fold<int>(0, (s, i) => s + (i['quantity'] as int));
+      if (currentInCart >= product.stock) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('لا يمكن إضافة المزيد! المخزون من “${product.name}” = ${product.stock} قطعة'),
+              backgroundColor: AppTheme.errorColor,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+        _barcodeController.clear();
+        _keepFocus();
+        return;
+      }
       setState(() {
         // إذا المنتج موجود مسبقاً بالفاتورة، نزيد الكمية فقط
         int index = _cart.indexWhere((item) => (item['product'] as ProductModel).id == product.id);
@@ -174,8 +200,21 @@ class _PosPageState extends State<PosPage> {
 
   // زيادة كمية منتج في السلة
   void _increaseQty(int index) {
+    final product = _cart[index]['product'] as ProductModel;
+    final qty = _cart[index]['quantity'] as int;
+    if (qty >= product.stock) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('لا يمكن إضافة المزيد! المخزون من “${product.name}” = ${product.stock} قطعة'),
+          backgroundColor: AppTheme.errorColor,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      _keepFocus();
+      return;
+    }
     setState(() {
-      _cart[index]['quantity'] = (_cart[index]['quantity'] as int) + 1;
+      _cart[index]['quantity'] = qty + 1;
     });
     _keepFocus();
   }
@@ -184,7 +223,9 @@ class _PosPageState extends State<PosPage> {
   Future<void> _showPaymentDialog() async {
     if (_cart.isEmpty) return;
 
-    final total = _totalAmount;
+    final int subtotal = _subtotal;
+    final int discountVal = _discountValue;
+    final int total = _finalTotal;
     final amountController = TextEditingController(text: '$total');
     bool shouldPrint = true;
 
@@ -202,13 +243,37 @@ class _PosPageState extends State<PosPage> {
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // عرض الخصم إذا كان موجوداً
+                if (discountVal > 0) ...[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('$subtotal دينار',
+                          style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              decoration: TextDecoration.lineThrough)),
+                      const Text('قبل الخصم:', style: TextStyle(color: AppTheme.textSecondary)),
+                    ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('- $discountVal دينار',
+                          style: const TextStyle(
+                              color: AppTheme.errorColor, fontWeight: FontWeight.bold)),
+                      const Text('الخصم:', style: TextStyle(color: AppTheme.errorColor)),
+                    ],
+                  ),
+                  const Divider(height: 12),
+                ],
                 // المجموع الكلي
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('المجموع:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Text('الإجمالي:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     Text('$total دينار',
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+                        style: const TextStyle(
+                            fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -314,10 +379,13 @@ class _PosPageState extends State<PosPage> {
         final p = i['product'] as ProductModel;
         return s + (p.profit * (i['quantity'] as int));
       });
-      setState(() => _cart.clear());
+      setState(() {
+        _cart.clear();
+        _discountAmount = 0;
+      });
 
       if (shouldPrint) {
-        await _printInvoice(cartSnapshot, total, given, changeAmount);
+        await _printInvoice(cartSnapshot, subtotal, discountVal, total, given, changeAmount);
       }
 
       if (mounted) {
@@ -342,11 +410,12 @@ class _PosPageState extends State<PosPage> {
     }
     _keepFocus();
   }
-
-  // طباعة فاتورة البيع كـ PDF
+  // طباعة فاتورة البيع — وصل بتصميم جديد ٤ أعمدة
   Future<void> _printInvoice(
     List<Map<String, dynamic>> cart,
-    int total,
+    int subtotal,
+    int discountValue,
+    int finalTotal,
     int given,
     int change,
   ) async {
@@ -355,24 +424,103 @@ class _PosPageState extends State<PosPage> {
     final storePhone = settings['store_phone'] ?? '';
     final currency = settings['currency'] ?? 'دينار';
     final footer = settings['receipt_footer'] ?? 'شكراً لزيارتكم';
+    final titleFs = double.tryParse(settings['receipt_title_font_size'] ?? '14') ?? 14.0;
+    final bodyFs = double.tryParse(settings['receipt_body_font_size'] ?? '9') ?? 9.0;
+    final paperW = double.tryParse(settings['receipt_paper_width_mm'] ?? '78') ?? 78.0;
 
     final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
-    final arabicFont = pw.Font.ttf(fontData);
+    final aroFont = pw.Font.ttf(fontData);
 
     final now = DateTime.now();
-    final dateStr =
-        '${now.year}/${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')}';
-    final timeStr =
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final dtStr =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}'
+        '  ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
+    // عكس ترتيب المواد (الأحدث إضافةً يظهر أعلى)
+    final reversed = cart.reversed.toList();
     final itemCount = cart.fold<int>(0, (s, i) => s + (i['quantity'] as int));
-    // ارتفاع تقريبي للفاتورة بناءً على عدد المنتجات
-    final pageHeight = (80 + cart.length * 18 + 80).toDouble() * PdfPageFormat.mm;
+
+    // حساب ارتفاع الورقة تلقائياً بناءً على عدد المواد
+    final rowH = bodyFs * 1.5 + 5.0;
+    final phoneH = storePhone.isNotEmpty ? 8.0 : 0.0;
+    final discountH = discountValue > 0 ? 16.0 : 0.0;
+    final changeH = given > finalTotal ? 16.0 : 0.0;
+    final pageH = 52.0 + phoneH + reversed.length * (rowH + 3.0) + discountH + changeH + 46.0;
+
     final pageFormat = PdfPageFormat(
-      78 * PdfPageFormat.mm,
-      pageHeight,
-      marginAll: 4 * PdfPageFormat.mm,
+      paperW * PdfPageFormat.mm,
+      pageH * PdfPageFormat.mm,
+      marginAll: 3 * PdfPageFormat.mm,
     );
+
+    pw.TextStyle body() => pw.TextStyle(font: aroFont, fontSize: bodyFs);
+    pw.TextStyle bodyBold() =>
+        pw.TextStyle(font: aroFont, fontSize: bodyFs, fontWeight: pw.FontWeight.bold);
+    pw.TextStyle titleSt() =>
+        pw.TextStyle(font: aroFont, fontSize: titleFs, fontWeight: pw.FontWeight.bold);
+    pw.TextStyle subTitleSt() => pw.TextStyle(font: aroFont, fontSize: titleFs - 2);
+
+    final solidDiv = pw.Divider(thickness: 0.5, color: PdfColors.black);
+    // فاصل منقط بين المواد
+    final dottedDiv = pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 1),
+      child: pw.Row(
+        children: List.generate(
+          28,
+          (_) => pw.Expanded(
+            child: pw.Container(
+              height: 0.4,
+              margin: const pw.EdgeInsets.symmetric(horizontal: 0.6),
+              color: PdfColors.grey600,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // بناء بنود الفاتورة
+    final List<pw.Widget> itemWidgets = [];
+    for (var i = 0; i < reversed.length; i++) {
+      final item = reversed[i];
+      final product = item['product'] as ProductModel;
+      final qty = item['quantity'] as int;
+      final rowTotal = product.price * qty;
+      itemWidgets.add(
+        pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+          child: pw.Row(
+            children: [
+              pw.Expanded(
+                flex: 4,
+                child: pw.Text(
+                  product.name,
+                  style: body(),
+                  textDirection: pw.TextDirection.rtl,
+                  textAlign: pw.TextAlign.right,
+                  overflow: pw.TextOverflow.clip,
+                ),
+              ),
+              pw.SizedBox(width: 2),
+              pw.SizedBox(
+                width: bodyFs * 3,
+                child: pw.Text('x$qty', style: body(), textAlign: pw.TextAlign.center),
+              ),
+              pw.SizedBox(width: 2),
+              pw.SizedBox(
+                width: bodyFs * 5,
+                child: pw.Text('${product.price}', style: body(), textAlign: pw.TextAlign.center),
+              ),
+              pw.SizedBox(width: 2),
+              pw.SizedBox(
+                width: bodyFs * 5.5,
+                child: pw.Text('$rowTotal', style: bodyBold(), textAlign: pw.TextAlign.left),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (i < reversed.length - 1) itemWidgets.add(dottedDiv);
+    }
 
     final doc = pw.Document();
     doc.addPage(
@@ -383,98 +531,101 @@ class _PosPageState extends State<PosPage> {
           crossAxisAlignment: pw.CrossAxisAlignment.center,
           children: [
             // اسم المحل
-            pw.Text(
-              storeName,
-              style: pw.TextStyle(fontSize: 14, font: arabicFont, fontWeight: pw.FontWeight.bold),
-              textDirection: pw.TextDirection.rtl,
-            ),
+            pw.Text(storeName, style: titleSt(), textDirection: pw.TextDirection.rtl),
             if (storePhone.isNotEmpty)
-              pw.Text(
-                storePhone,
-                style: pw.TextStyle(fontSize: 9, font: arabicFont),
-                textDirection: pw.TextDirection.rtl,
-              ),
-            pw.SizedBox(height: 4),
-            pw.Divider(thickness: 0.5),
+              pw.Text(storePhone, style: subTitleSt(), textDirection: pw.TextDirection.rtl),
+            pw.SizedBox(height: 3),
+            solidDiv,
             // التاريخ والوقت
+            pw.Text(dtStr, style: body()),
+            solidDiv,
+            pw.SizedBox(height: 2),
+            // رأس الجدول (ترتيب RTL: اسم المادة | العدد | السعر | الإجمالي)
             pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text(timeStr, style: pw.TextStyle(fontSize: 8, font: arabicFont)),
-                pw.Text(dateStr, style: pw.TextStyle(fontSize: 8, font: arabicFont)),
+                pw.Expanded(
+                  flex: 4,
+                  child: pw.Text('اسم المادة',
+                      style: bodyBold(),
+                      textDirection: pw.TextDirection.rtl,
+                      textAlign: pw.TextAlign.right),
+                ),
+                pw.SizedBox(width: 2),
+                pw.SizedBox(
+                    width: bodyFs * 3,
+                    child: pw.Text('العدد', style: bodyBold(), textAlign: pw.TextAlign.center)),
+                pw.SizedBox(width: 2),
+                pw.SizedBox(
+                    width: bodyFs * 5,
+                    child: pw.Text('السعر', style: bodyBold(), textAlign: pw.TextAlign.center)),
+                pw.SizedBox(width: 2),
+                pw.SizedBox(
+                    width: bodyFs * 5.5,
+                    child: pw.Text('الإجمالي', style: bodyBold(), textAlign: pw.TextAlign.left)),
               ],
             ),
-            pw.Divider(thickness: 0.5),
+            solidDiv,
             pw.SizedBox(height: 2),
-            // المنتجات
-            ...cart.map((item) {
-              final product = item['product'] as ProductModel;
-              final qty = item['quantity'] as int;
-              final subtotal = product.price * qty;
-              return pw.Padding(
-                padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      '$subtotal $currency',
-                      style: pw.TextStyle(fontSize: 9, font: arabicFont),
-                    ),
-                    pw.Expanded(
-                      child: pw.Text(
-                        '${product.name}  x$qty',
-                        style: pw.TextStyle(fontSize: 9, font: arabicFont),
-                        textDirection: pw.TextDirection.rtl,
-                        textAlign: pw.TextAlign.right,
-                        overflow: pw.TextOverflow.clip,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }),
-            pw.SizedBox(height: 4),
-            pw.Divider(thickness: 0.8),
-            // المجموع
+            // بنود الفاتورة
+            ...itemWidgets,
+            pw.SizedBox(height: 3),
+            solidDiv,
+            // الخصم (إذا كان هناك خصم)
+            if (discountValue > 0) ...[
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('$subtotal $currency', style: body()),
+                  pw.Text('المجموع:', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+                ],
+              ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('- $discountValue $currency',
+                      style: pw.TextStyle(font: aroFont, fontSize: bodyFs, color: PdfColors.red)),
+                  pw.Text('الخصم:', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+                ],
+              ),
+              pw.Divider(thickness: 0.5),
+            ],
+            // الإجمالي النهائي
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
+                pw.Text('$finalTotal $currency', style: titleSt()),
                 pw.Text(
-                  '$total $currency',
-                  style: pw.TextStyle(fontSize: 13, font: arabicFont, fontWeight: pw.FontWeight.bold),
-                ),
-                pw.Text(
-                  'المجموع ($itemCount قطعة):',
-                  style: pw.TextStyle(fontSize: 11, font: arabicFont, fontWeight: pw.FontWeight.bold),
+                  '${discountValue > 0 ? 'الصافي' : 'الإجمالي'} ($itemCount قطعة):',
+                  style: subTitleSt(),
                   textDirection: pw.TextDirection.rtl,
                 ),
               ],
             ),
-            // المدفوع والباقي (إذا دفع أكثر)
-            if (given > total) ...([
+            // المدفوع والباقي
+            if (given > finalTotal) ...[
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text('$given $currency', style: pw.TextStyle(fontSize: 10, font: arabicFont)),
-                  pw.Text('المدفوع:', style: pw.TextStyle(fontSize: 10, font: arabicFont), textDirection: pw.TextDirection.rtl),
+                  pw.Text('$given $currency', style: body()),
+                  pw.Text('المدفوع:', style: bodyBold(), textDirection: pw.TextDirection.rtl),
                 ],
               ),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text('$change $currency',
-                      style: pw.TextStyle(fontSize: 11, font: arabicFont, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('الباقي:', style: pw.TextStyle(fontSize: 11, font: arabicFont, fontWeight: pw.FontWeight.bold), textDirection: pw.TextDirection.rtl),
+                      style: pw.TextStyle(
+                          font: aroFont, fontSize: bodyFs + 1, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('الباقي:', style: bodyBold(), textDirection: pw.TextDirection.rtl),
                 ],
               ),
-            ]),
-            pw.Divider(thickness: 0.5),
+            ],
+            dottedDiv,
             pw.SizedBox(height: 4),
-            pw.Text(
-              footer,
-              style: pw.TextStyle(fontSize: 10, font: arabicFont),
-              textDirection: pw.TextDirection.rtl,
-            ),
+            pw.Text(footer,
+                style: body(),
+                textDirection: pw.TextDirection.rtl,
+                textAlign: pw.TextAlign.center),
           ],
         ),
       ),
@@ -584,14 +735,182 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  // حساب المجموع الكلي الدقيق للفاتورة (Financial Precision)
-  int get _totalAmount {
-    return _cart.fold(0, (sum, item) {
-      final product = item['product'] as ProductModel;
-      final qty = item['quantity'] as int;
-      return sum + (product.price * qty);
-    });
+  // ─── تحميل جميع المنتجات ───
+  Future<void> _loadAllProducts() async {
+    final products = await DatabaseHelper.instance.getAllProducts();
+    if (mounted) setState(() => _allProducts = products);
   }
+
+  // ─── حوار الخصم ───
+  Future<void> _showDiscountDialog() async {
+    final ctrl = TextEditingController(text: _discountAmount > 0 ? '$_discountAmount' : '');
+    bool isPercent = _isDiscountPercent;
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setS) => AlertDialog(
+          title: const Text('خصم على الفاتورة'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, label: Text('مبلغ ثابت')),
+                  ButtonSegment(value: true, label: Text('نسبة مئوية %')),
+                ],
+                selected: {isPercent},
+                onSelectionChanged: (s) => setS(() => isPercent = s.first),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: ctrl,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                decoration: InputDecoration(
+                  labelText: isPercent ? 'نسبة الخصم' : 'مبلغ الخصم',
+                  border: const OutlineInputBorder(),
+                  suffixText: isPercent ? '%' : 'دينار',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
+              onPressed: () {
+                setState(() {
+                  _discountAmount = 0;
+                  _isDiscountPercent = false;
+                });
+                Navigator.pop(ctx);
+              },
+              child: const Text('إزالة الخصم'),
+            ),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+              onPressed: () {
+                final v = int.tryParse(ctrl.text) ?? 0;
+                setState(() {
+                  _discountAmount = v.clamp(0, isPercent ? 100 : _subtotal);
+                  _isDiscountPercent = isPercent;
+                });
+                Navigator.pop(ctx);
+              },
+              child: const Text('تطبيق'),
+            ),
+          ],
+        ),
+      ),
+    );
+    ctrl.dispose();
+    _keepFocus();
+  }
+
+  // ─── حوار البحث عن منتج ───
+  Future<void> _showProductSearchDialog() async {
+    final ctrl = TextEditingController();
+    String query = '';
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setS) {
+          final filtered = query.isEmpty
+              ? _allProducts
+              : _allProducts
+                  .where((p) =>
+                      p.name.toLowerCase().contains(query.toLowerCase()) ||
+                      p.barcode.contains(query))
+                  .toList();
+          return AlertDialog(
+            title: const Text('بحث عن منتج'),
+            contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            content: SizedBox(
+              width: 440,
+              height: 380,
+              child: Column(
+                children: [
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      hintText: 'ابحث بالاسم أو الباركود...',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onChanged: (v) => setS(() => query = v),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (_, i) {
+                        final p = filtered[i];
+                        final inCart = _cart
+                            .where((c) => (c['product'] as ProductModel).id == p.id)
+                            .fold<int>(0, (s, c) => s + (c['quantity'] as int));
+                        final remaining = p.stock - inCart;
+                        return ListTile(
+                          dense: true,
+                          title: Text(p.name,
+                              style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('${p.price} دينار — متبقي: $remaining'),
+                          trailing: remaining > 0
+                              ? IconButton(
+                                  icon: const Icon(Icons.add_circle,
+                                      color: AppTheme.successColor),
+                                  onPressed: () {
+                                    setState(() {
+                                      final idx = _cart.indexWhere(
+                                          (c) => (c['product'] as ProductModel).id == p.id);
+                                      if (idx >= 0) {
+                                        _cart[idx]['quantity'] =
+                                            (_cart[idx]['quantity'] as int) + 1;
+                                      } else {
+                                        _cart.add({'product': p, 'quantity': 1});
+                                      }
+                                    });
+                                    setS(() {});
+                                  },
+                                )
+                              : const Icon(Icons.remove_circle_outline,
+                                  color: AppTheme.errorColor),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق'))
+            ],
+          );
+        },
+      ),
+    );
+    ctrl.dispose();
+    _keepFocus();
+  }
+
+  // ─── حساب الإجماليات ───
+  int get _subtotal => _cart.fold(0, (s, i) {
+        final p = i['product'] as ProductModel;
+        return s + (p.price * (i['quantity'] as int));
+      });
+
+  int get _discountValue {
+    if (_discountAmount <= 0) return 0;
+    if (_isDiscountPercent) return _subtotal * _discountAmount ~/ 100;
+    return _discountAmount.clamp(0, _subtotal);
+  }
+
+  int get _finalTotal => _subtotal - _discountValue;
 
   @override
   Widget build(BuildContext context) {
@@ -618,6 +937,12 @@ class _PosPageState extends State<PosPage> {
             ),
             onPressed: _showSuspendedOrders,
             tooltip: 'الفواتير المعلقة',
+          ),
+          // زر البحث عن منتج
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: _showProductSearchDialog,
+            tooltip: 'بحث عن منتج',
           ),
           // زر الكاميرا يظهر على الموبايل فقط
           if (!kIsWeb && (Platform.isAndroid || Platform.isIOS))
@@ -716,56 +1041,111 @@ class _PosPageState extends State<PosPage> {
 
             // 3. لوحة التحكم السفلية (سيتم نقلها لملف pos_control_panel لاحقاً)
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
               decoration: BoxDecoration(
                 color: Colors.white,
                 boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))],
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  // صف الخصم (يظهر فقط عند وجود خصم)
+                  if (_discountValue > 0) ...[  
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('$_subtotal دينار',
+                            style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                                decoration: TextDecoration.lineThrough,
+                                fontSize: 14)),
+                        Text('خصم: -$_discountValue دينار',
+                            style: const TextStyle(
+                                color: AppTheme.errorColor,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14)),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+                  // صف الإجمالي
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('الإجمالي:', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                      Text('$_totalAmount دينار', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+                      Text(
+                        _discountValue > 0 ? 'الصافي:' : 'الإجمالي:',
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                      ),
+                      Text('$_finalTotal دينار',
+                          style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primaryColor)),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
+                  // صف الأزرار
                   Row(
                     children: [
+                      // زر الخصم
+                      IconButton(
+                        icon: Icon(
+                          Icons.discount_outlined,
+                          color: _discountValue > 0 ? AppTheme.errorColor : AppTheme.textSecondary,
+                          size: 28,
+                        ),
+                        onPressed: _cart.isEmpty ? null : _showDiscountDialog,
+                        tooltip: 'خصم',
+                      ),
+                      const SizedBox(width: 4),
                       Expanded(
                         child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.errorColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12)),
                           icon: const Icon(Icons.cancel),
-                          label: const Text('إلغاء', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          label: const Text('إلغاء',
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                           onPressed: () {
-                            setState(() => _cart.clear());
+                            setState(() {
+                              _cart.clear();
+                              _discountAmount = 0;
+                            });
                             _keepFocus();
                           },
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.warningColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.warningColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12)),
                           icon: const Icon(Icons.pause_circle_filled),
-                          label: const Text('تعليق', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          label: const Text('تعليق',
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                           onPressed: _suspendOrder,
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8),
                       Expanded(
                         flex: 2,
                         child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
-                          icon: const Icon(Icons.print),
-                          label: const Text('دفع وطباعة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.successColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12)),
+                          icon: const Icon(Icons.point_of_sale),
+                          label: const Text('دفع',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                           onPressed: _cart.isEmpty ? null : _showPaymentDialog,
                         ),
                       ),
                     ],
-                  )
+                  ),
                 ],
               ),
             ),

@@ -48,6 +48,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    DatabaseHelper.revision.addListener(_loadAllProducts);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
       if (_tabController.index == 0) {
@@ -71,6 +72,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   @override
   void dispose() {
     _tabController.dispose();
+    DatabaseHelper.revision.removeListener(_loadAllProducts);
     _nameController.dispose();
     _colorController.dispose();
     _sizeController.dispose();
@@ -312,12 +314,20 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
       children: [
         Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+            padding: const EdgeInsets.all(20.0),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 580),
+                child: Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
             // 1. اختيار القسم
             Row(
               children: [
@@ -440,7 +450,11 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
               icon: Icons.save,
               onPressed: _saveProduct,
             ),
-                ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
