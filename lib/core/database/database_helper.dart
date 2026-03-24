@@ -497,4 +497,35 @@ class DatabaseHelper {
       return {'today_revenue': 0, 'today_profit': 0, 'today_count': 0, 'all_revenue': 0, 'all_profit': 0, 'all_count': 0};
     }
   }
+
+  /// جلب مبيعات ضمن فترة زمنية
+  Future<List<Map<String, dynamic>>> getSalesByDateRange(String from, String to) async {
+    try {
+      final db = await instance.database;
+      return await db.query('sales',
+          where: "created_at >= ? AND created_at < ?",
+          whereArgs: [from, to],
+          orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// ملخص مبيعات ضمن فترة زمنية
+  Future<Map<String, int>> getSalesSummaryByDateRange(String from, String to) async {
+    try {
+      final db = await instance.database;
+      final result = await db.rawQuery(
+        "SELECT COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(total_profit), 0) as profit, COUNT(*) as count FROM sales WHERE created_at >= ? AND created_at < ?",
+        [from, to],
+      );
+      return {
+        'revenue': result.first['revenue'] as int? ?? 0,
+        'profit': result.first['profit'] as int? ?? 0,
+        'count': result.first['count'] as int? ?? 0,
+      };
+    } catch (e) {
+      return {'revenue': 0, 'profit': 0, 'count': 0};
+    }
+  }
 }

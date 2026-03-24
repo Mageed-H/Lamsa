@@ -48,11 +48,19 @@ class _BarcodePrintDialog extends StatefulWidget {
 
 class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   late int _copies;
+  late TextEditingController _copiesController;
 
   @override
   void initState() {
     super.initState();
     _copies = widget.initialCopies;
+    _copiesController = TextEditingController(text: '$_copies');
+  }
+
+  @override
+  void dispose() {
+    _copiesController.dispose();
+    super.dispose();
   }
 
   // تحديد نوع الباركود بناءً على المحتوى
@@ -204,19 +212,41 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
                 const SizedBox(width: 12),
                 IconButton(
                   icon: const Icon(Icons.remove_circle_outline, color: AppTheme.primaryColor),
-                  onPressed: _copies > 1 ? () => setState(() => _copies--) : null,
+                  onPressed: _copies > 1 ? () {
+                    setState(() {
+                      _copies--;
+                      _copiesController.text = '$_copies';
+                    });
+                  } : null,
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: AppTheme.primaryColor),
-                    borderRadius: BorderRadius.circular(8),
+                SizedBox(
+                  width: 70,
+                  child: TextField(
+                    controller: _copiesController,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.primaryColor)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.primaryColor)),
+                    ),
+                    onChanged: (val) {
+                      final n = int.tryParse(val);
+                      if (n != null && n >= 1 && n <= 999) {
+                        setState(() => _copies = n);
+                      }
+                    },
                   ),
-                  child: Text('$_copies', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 ),
                 IconButton(
                   icon: const Icon(Icons.add_circle_outline, color: AppTheme.primaryColor),
-                  onPressed: _copies < 100 ? () => setState(() => _copies++) : null,
+                  onPressed: _copies < 999 ? () {
+                    setState(() {
+                      _copies++;
+                      _copiesController.text = '$_copies';
+                    });
+                  } : null,
                 ),
               ],
             ),
