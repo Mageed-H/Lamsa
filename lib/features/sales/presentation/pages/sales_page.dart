@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lamsa/core/database/database_helper.dart';
 import 'package:lamsa/core/theme/app_theme.dart';
 
-enum SalesFilter { today, thisWeek, thisMonth, customMonth, all }
+enum SalesFilter { today, thisWeek, thisMonth, customMonth, customRange, all }
 
 class SalesPage extends StatefulWidget {
   const SalesPage({Key? key}) : super(key: key);
@@ -18,6 +18,7 @@ class _SalesPageState extends State<SalesPage> {
   bool _isLoading = true;
   SalesFilter _activeFilter = SalesFilter.today;
   DateTime? _selectedMonth;
+  DateTimeRange? _selectedRange;
 
   @override
   void initState() {
@@ -46,6 +47,13 @@ class _SalesPageState extends State<SalesPage> {
         final monthStart = DateTime(m.year, m.month, 1);
         final monthEnd = DateTime(m.year, m.month + 1, 1);
         return (monthStart.toIso8601String(), monthEnd.toIso8601String());
+      case SalesFilter.customRange:
+        if (_selectedRange != null) {
+          final from = DateTime(_selectedRange!.start.year, _selectedRange!.start.month, _selectedRange!.start.day);
+          final to = DateTime(_selectedRange!.end.year, _selectedRange!.end.month, _selectedRange!.end.day).add(const Duration(days: 1));
+          return (from.toIso8601String(), to.toIso8601String());
+        }
+        return ('2000-01-01', '2100-01-01');
       case SalesFilter.all:
         return ('2000-01-01', '2100-01-01');
     }
@@ -88,6 +96,26 @@ class _SalesPageState extends State<SalesPage> {
     }
   }
 
+  Future<void> _pickDateRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: now,
+      initialDateRange: _selectedRange ?? DateTimeRange(
+        start: DateTime(now.year, now.month, 1),
+        end: now,
+      ),
+      helpText: 'اختر الفترة',
+      saveText: 'تطبيق',
+      cancelText: 'إلغاء',
+    );
+    if (picked != null) {
+      _selectedRange = picked;
+      _setFilter(SalesFilter.customRange);
+    }
+  }
+
   String _getFilterLabel() {
     switch (_activeFilter) {
       case SalesFilter.today: return 'اليوم';
@@ -98,6 +126,13 @@ class _SalesPageState extends State<SalesPage> {
           return '${_selectedMonth!.year}/${_selectedMonth!.month}';
         }
         return 'شهر محدد';
+      case SalesFilter.customRange:
+        if (_selectedRange != null) {
+          final s = _selectedRange!.start;
+          final e = _selectedRange!.end;
+          return '${s.month}/${s.day} - ${e.month}/${e.day}';
+        }
+        return 'فترة محددة';
       case SalesFilter.all: return 'الكل';
     }
   }
@@ -155,6 +190,8 @@ class _SalesPageState extends State<SalesPage> {
                         const SizedBox(width: 6),
                         _buildMonthPickerChip(),
                         const SizedBox(width: 6),
+                        _buildDateRangeChip(),
+                        const SizedBox(width: 6),
                         _buildFilterChip('الكل', SalesFilter.all, Icons.all_inclusive),
                       ],
                     ),
@@ -163,6 +200,15 @@ class _SalesPageState extends State<SalesPage> {
                   // ملخص الفترة المحددة
                   if (_activeFilter != SalesFilter.today && _activeFilter != SalesFilter.all)
                     _buildPeriodSummary(),
+                  if (_activeFilter == SalesFilter.customRange && _selectedRange != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '${_selectedRange!.start.year}/${_selectedRange!.start.month}/${_selectedRange!.start.day}  ←  ${_selectedRange!.end.year}/${_selectedRange!.end.month}/${_selectedRange!.end.day}',
+                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
                   // عنوان القائمة
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -232,6 +278,35 @@ class _SalesPageState extends State<SalesPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.edit_calendar, size: 16, color: isActive ? Colors.white : AppTheme.textSecondary),
+            const SizedBox(width: 4),
+            Text(label, style: TextStyle(
+              color: isActive ? Colors.white : AppTheme.textSecondary,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDateRangeChip() {
+    final isActive = _activeFilter == SalesFilter.customRange;
+    final label = isActive && _selectedRange != null
+        ? '${_selectedRange!.start.month}/${_selectedRange!.start.day} - ${_selectedRange!.end.month}/${_selectedRange!.end.day}'
+        : 'فترة محددة';
+    return GestureDetector(
+      onTap: _pickDateRange,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive ? AppTheme.primaryColor : AppTheme.neutralLightColor,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.date_range_outlined, size: 16, color: isActive ? Colors.white : AppTheme.textSecondary),
             const SizedBox(width: 4),
             Text(label, style: TextStyle(
               color: isActive ? Colors.white : AppTheme.textSecondary,
