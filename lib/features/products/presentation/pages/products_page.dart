@@ -536,7 +536,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                               children: [
                                 IconButton(
                                   icon: const Icon(Icons.print, color: AppTheme.successColor),
-                                  onPressed: () => BarcodePrinterWidget.show(context, barcode: p.barcode, productName: p.name),
+                                  onPressed: () => BarcodePrinterWidget.show(context, barcode: p.barcode, productName: p.name, price: p.price),
                                   tooltip: 'طباعة باركود',
                                 ),
                                 IconButton(
@@ -814,7 +814,7 @@ class _EditProductDialogState extends State<_EditProductDialog> {
                             ),
                             IconButton(
                               icon: const Icon(Icons.print, size: 18, color: AppTheme.successColor),
-                              onPressed: () => BarcodePrinterWidget.show(context, barcode: b['barcode'] as String, productName: widget.product.name),
+                              onPressed: () => BarcodePrinterWidget.show(context, barcode: b['barcode'] as String, productName: widget.product.name, price: widget.product.price),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
                               tooltip: 'طباعة',

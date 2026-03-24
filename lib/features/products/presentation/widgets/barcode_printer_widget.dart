@@ -13,6 +13,7 @@ class BarcodePrinterWidget {
   static void show(BuildContext context, {
     required String barcode,
     required String productName,
+    required int price,
     int copies = 1,
   }) {
     showDialog(
@@ -20,6 +21,7 @@ class BarcodePrinterWidget {
       builder: (ctx) => _BarcodePrintDialog(
         barcode: barcode,
         productName: productName,
+        price: price,
         initialCopies: copies,
       ),
     );
@@ -29,11 +31,13 @@ class BarcodePrinterWidget {
 class _BarcodePrintDialog extends StatefulWidget {
   final String barcode;
   final String productName;
+  final int price;
   final int initialCopies;
 
   const _BarcodePrintDialog({
     required this.barcode,
     required this.productName,
+    required this.price,
     required this.initialCopies,
   });
 
@@ -53,23 +57,18 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   // تحديد نوع الباركود بناءً على المحتوى
   Barcode _detectBarcodeType() {
     final code = widget.barcode;
-    // الباركودات المحلية (LOC-) أو التي تحتوي حروف → Code128
     if (code.contains(RegExp(r'[a-zA-Z\-]'))) {
       return Barcode.code128();
     }
-    // EAN-13
     if (code.length == 13 && RegExp(r'^\d+$').hasMatch(code)) {
       return Barcode.ean13();
     }
-    // EAN-8
     if (code.length == 8 && RegExp(r'^\d+$').hasMatch(code)) {
       return Barcode.ean8();
     }
-    // UPC-A
     if (code.length == 12 && RegExp(r'^\d+$').hasMatch(code)) {
       return Barcode.upcA();
     }
-    // افتراضي
     return Barcode.code128();
   }
 
@@ -92,18 +91,24 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
 
   Future<void> _printBarcode() async {
     final pdfBarcodeType = _detectPdfBarcodeType();
+
+    // تحميل خط عربي من Google Fonts
+    final arabicFont = await PdfGoogleFonts.cairoRegular();
+    final arabicFontBold = await PdfGoogleFonts.cairoBold();
+
     final doc = pw.Document();
 
     doc.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4,
+        textDirection: pw.TextDirection.rtl,
         build: (pw.Context context) {
           return pw.Wrap(
             spacing: 8,
             runSpacing: 8,
             children: List.generate(_copies, (_) => pw.Container(
               width: 180,
-              height: 100,
+              height: 110,
               padding: const pw.EdgeInsets.all(6),
               decoration: pw.BoxDecoration(
                 border: pw.Border.all(width: 0.5),
@@ -113,18 +118,29 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
                 children: [
                   pw.Text(
                     widget.productName,
-                    style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                    style: pw.TextStyle(fontSize: 9, font: arabicFontBold),
                     maxLines: 1,
+                    textDirection: pw.TextDirection.rtl,
                   ),
-                  pw.SizedBox(height: 4),
+                  pw.SizedBox(height: 3),
                   pw.BarcodeWidget(
                     barcode: pdfBarcodeType,
                     data: widget.barcode,
                     width: 160,
-                    height: 50,
+                    height: 45,
                   ),
                   pw.SizedBox(height: 2),
-                  pw.Text(widget.barcode, style: const pw.TextStyle(fontSize: 8)),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(widget.barcode, style: pw.TextStyle(fontSize: 7, font: arabicFont)),
+                      pw.Text(
+                        '${widget.price} د',
+                        style: pw.TextStyle(fontSize: 10, font: arabicFontBold),
+                        textDirection: pw.TextDirection.rtl,
+                      ),
+                    ],
+                  ),
                 ],
               ),
             )),
@@ -145,9 +161,10 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // اسم المنتج
+            // اسم المنتج + السعر
             Text(widget.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 16),
+            Text('${widget.price} دينار', style: const TextStyle(color: AppTheme.successColor, fontWeight: FontWeight.bold, fontSize: 14)),
+            const SizedBox(height: 12),
             // معاينة الباركود
             Container(
               padding: const EdgeInsets.all(12),
@@ -156,17 +173,27 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
                 borderRadius: BorderRadius.circular(8),
                 color: Colors.white,
               ),
-              child: BarcodeWidget(
-                barcode: _detectBarcodeType(),
-                data: widget.barcode,
-                width: 250,
-                height: 80,
-                style: const TextStyle(fontSize: 12),
+              child: Column(
+                children: [
+                  BarcodeWidget(
+                    barcode: _detectBarcodeType(),
+                    data: widget.barcode,
+                    width: 250,
+                    height: 80,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(widget.barcode, style: const TextStyle(fontFamily: 'monospace', color: AppTheme.textSecondary, fontSize: 11)),
+                      Text('${widget.price} د', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.primaryColor)),
+                    ],
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 4),
-            Text(widget.barcode, style: const TextStyle(fontFamily: 'monospace', color: AppTheme.textSecondary)),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             // عدد النسخ
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
