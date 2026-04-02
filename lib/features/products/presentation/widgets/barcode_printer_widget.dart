@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:lamsa/core/theme/app_theme.dart';
+import 'package:lamsa/core/database/database_helper.dart';
 
 /// يعرض معاينة باركود المنتج مع إمكانية الطباعة
 class BarcodePrinterWidget {
@@ -101,6 +102,17 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   Future<void> _printBarcode() async {
     final pdfBarcodeType = _detectPdfBarcodeType();
 
+    // تحميل الإعدادات من قاعدة البيانات
+    final settings = await DatabaseHelper.instance.getAllSettings();
+    final labelW = (double.tryParse(settings['barcode_label_width_mm'] ?? '60') ?? 60.0) * PdfPageFormat.mm;
+    final labelH = (double.tryParse(settings['barcode_label_height_mm'] ?? '35') ?? 35.0) * PdfPageFormat.mm;
+    final labelPad = (double.tryParse(settings['barcode_inner_padding_mm'] ?? '3') ?? 3.0) * PdfPageFormat.mm;
+    // أبعاد الباركود الداخلية مرتبطة بأبعاد البطاقة
+    final innerW = labelW - 2 * labelPad;
+    final innerBarH = (labelH - 2 * labelPad) * 0.5;
+    final savedPrinterUrl = settings['default_printer_url'] ?? '';
+    final savedPrinterName = settings['default_printer_name'] ?? '';
+
     // تحميل خط عربي محلي (لا يحتاج إنترنت)
     final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
     final arabicFont = pw.Font.ttf(fontData);
@@ -117,9 +129,9 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
             spacing: 8,
             runSpacing: 8,
             children: List.generate(_copies, (_) => pw.Container(
-              width: 180,
-              height: 110,
-              padding: const pw.EdgeInsets.all(6),
+              width: labelW,
+              height: labelH,
+              padding: pw.EdgeInsets.all(labelPad),
               decoration: pw.BoxDecoration(
                 border: pw.Border.all(width: 0.5),
               ),
@@ -136,8 +148,8 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
                   pw.BarcodeWidget(
                     barcode: pdfBarcodeType,
                     data: widget.barcode,
-                    width: 160,
-                    height: 45,
+                    width: innerW,
+                    height: innerBarH,
                   ),
                   pw.SizedBox(height: 2),
                   pw.Row(
@@ -159,6 +171,15 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
       ),
     );
 
+    if (savedPrinterUrl.isNotEmpty) {
+      try {
+        final ok = await Printing.directPrintPdf(
+          printer: Printer(url: savedPrinterUrl, name: savedPrinterName),
+          onLayout: (_) => doc.save(),
+        );
+        if (ok) return;
+      } catch (_) {}
+    }
     await Printing.layoutPdf(onLayout: (_) => doc.save());
   }
 

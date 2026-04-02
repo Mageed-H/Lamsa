@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:lamsa/core/database/database_helper.dart';
 import 'package:lamsa/core/theme/app_theme.dart';
 
@@ -27,6 +28,14 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
   final _titleFontCtrl = TextEditingController();
   final _bodyFontCtrl = TextEditingController();
   final _paperWidthCtrl = TextEditingController();
+  // أبعاد الباركود + هوامش
+  final _barcodeWCtrl = TextEditingController();
+  final _barcodeHCtrl = TextEditingController();
+  final _barcodePadCtrl = TextEditingController();
+  final _receiptMarginCtrl = TextEditingController();
+  // الطابعة الافتراضية
+  String _defaultPrinterName = '';
+  String _defaultPrinterUrl = '';
 
   @override
   void initState() {
@@ -45,6 +54,10 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
     _titleFontCtrl.dispose();
     _bodyFontCtrl.dispose();
     _paperWidthCtrl.dispose();
+    _barcodeWCtrl.dispose();
+    _barcodeHCtrl.dispose();
+    _barcodePadCtrl.dispose();
+    _receiptMarginCtrl.dispose();
     super.dispose();
   }
 
@@ -61,6 +74,12 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       _titleFontCtrl.text = settings['receipt_title_font_size'] ?? '14';
       _bodyFontCtrl.text = settings['receipt_body_font_size'] ?? '9';
       _paperWidthCtrl.text = settings['receipt_paper_width_mm'] ?? '78';
+      _barcodeWCtrl.text = settings['barcode_label_width_mm'] ?? '60';
+      _barcodeHCtrl.text = settings['barcode_label_height_mm'] ?? '35';
+      _barcodePadCtrl.text = settings['barcode_inner_padding_mm'] ?? '3';
+      _receiptMarginCtrl.text = settings['receipt_margin_mm'] ?? '3';
+      _defaultPrinterUrl = settings['default_printer_url'] ?? '';
+      _defaultPrinterName = settings['default_printer_name'] ?? '';
       _isLoading = false;
     });
   }
@@ -79,6 +98,10 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       DatabaseHelper.instance.setSetting('receipt_title_font_size', _titleFontCtrl.text.trim()),
       DatabaseHelper.instance.setSetting('receipt_body_font_size', _bodyFontCtrl.text.trim()),
       DatabaseHelper.instance.setSetting('receipt_paper_width_mm', _paperWidthCtrl.text.trim()),
+      DatabaseHelper.instance.setSetting('barcode_label_width_mm', _barcodeWCtrl.text.trim()),
+      DatabaseHelper.instance.setSetting('barcode_label_height_mm', _barcodeHCtrl.text.trim()),
+      DatabaseHelper.instance.setSetting('barcode_inner_padding_mm', _barcodePadCtrl.text.trim()),
+      DatabaseHelper.instance.setSetting('receipt_margin_mm', _receiptMarginCtrl.text.trim()),
     ]);
 
     if (!mounted) return;
@@ -91,6 +114,38 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
         duration: Duration(seconds: 2),
       ),
     );
+  }
+
+  // ─── اختيار طابعة افتراضية ───
+  Future<void> _pickDefaultPrinter() async {
+    final printer = await Printing.pickPrinter(context: context);
+    if (printer != null && mounted) {
+      await Future.wait([
+        DatabaseHelper.instance.setSetting('default_printer_url', printer.url),
+        DatabaseHelper.instance.setSetting('default_printer_name', printer.name),
+      ]);
+      setState(() {
+        _defaultPrinterUrl = printer.url;
+        _defaultPrinterName = printer.name;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✓ تم حفظ الطابعة: ${printer.name}'),
+            backgroundColor: AppTheme.successColor,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _clearDefaultPrinter() async {
+    await Future.wait([
+      DatabaseHelper.instance.setSetting('default_printer_url', ''),
+      DatabaseHelper.instance.setSetting('default_printer_name', ''),
+    ]);
+    if (mounted) setState(() { _defaultPrinterUrl = ''; _defaultPrinterName = ''; });
   }
 
   @override
@@ -201,6 +256,8 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                       return null;
                     },
                   ),
+                  const SizedBox(height: 16),
+                  _buildSectionHeader('🧾  طباعة الفاتورة — أبعاد الصفحة'),
                   _buildSettingField(
                     controller: _paperWidthCtrl,
                     label: 'عرض ورقة الطباعة (ملم)',
@@ -212,6 +269,133 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                       if (n == null || n < 50 || n > 210) return 'أدخل عرضاً بين 50 و 210 ملم';
                       return null;
                     },
+                  ),
+                  _buildSettingField(
+                    controller: _receiptMarginCtrl,
+                    label: 'هامش الفاتورة من جميع الجوانب (ملم)',
+                    hint: 'افتراضي: 3',
+                    icon: Icons.margin,
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      final n = double.tryParse(v ?? '');
+                      if (n == null || n < 0 || n > 20) return 'أدخل قيمة بين 0 و 20 ملم';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSectionHeader('🏷️  طباعة الباركود — أبعاد البطاقة'),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildSettingField(
+                          controller: _barcodeWCtrl,
+                          label: 'عرض البطاقة (ملم)',
+                          hint: 'افتراضي: 60',
+                          icon: Icons.crop_landscape,
+                          keyboardType: TextInputType.number,
+                          validator: (v) {
+                            final n = double.tryParse(v ?? '');
+                            if (n == null || n < 20 || n > 200) return 'بين 20–200';
+                            return null;
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildSettingField(
+                          controller: _barcodeHCtrl,
+                          label: 'ارتفاع البطاقة (ملم)',
+                          hint: 'افتراضي: 35',
+                          icon: Icons.crop_portrait,
+                          keyboardType: TextInputType.number,
+                          validator: (v) {
+                            final n = double.tryParse(v ?? '');
+                            if (n == null || n < 10 || n > 100) return 'بين 10–100';
+                            return null;
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  _buildSettingField(
+                    controller: _barcodePadCtrl,
+                    label: 'هامش داخل بطاقة الباركود (ملم)',
+                    hint: 'افتراضي: 3',
+                    icon: Icons.padding,
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      final n = double.tryParse(v ?? '');
+                      if (n == null || n < 0 || n > 15) return 'بين 0–15 ملم';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSectionHeader('🖨️  الطابعة الافتراضية'),
+                  // بطاقة الطابعة
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF37474F),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.print, color: Colors.amber.shade400, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('الطابعة المحفوظة',
+                                  style: TextStyle(color: Colors.white60, fontSize: 11)),
+                              Text(
+                                _defaultPrinterName.isEmpty ? 'لم يتم الاختيار' : _defaultPrinterName,
+                                style: TextStyle(
+                                  color: _defaultPrinterName.isEmpty
+                                      ? Colors.white38
+                                      : Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.amber.shade700,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          icon: const Icon(Icons.search, size: 16),
+                          label: const Text('اختيار',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          onPressed: _pickDefaultPrinter,
+                        ),
+                        if (_defaultPrinterUrl.isNotEmpty) ...[  
+                          const SizedBox(width: 4),
+                          IconButton(
+                            icon: const Icon(Icons.clear, color: Colors.red, size: 18),
+                            tooltip: 'حذف الطابعة المحفوظة',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: _clearDefaultPrinter,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      _defaultPrinterUrl.isEmpty
+                          ? 'ℹ️ عند اختيار طابعة، ستُطبع الفواتير والباركودات مباشرةً دون طلب الاختيار في كل مرة.'
+                          : '✅ الطباعة ستذهب مباشرةً ل: $_defaultPrinterName',
+                      style: const TextStyle(color: Colors.white38, fontSize: 11),
+                    ),
                   ),
                   const SizedBox(height: 32),
                   SizedBox(
@@ -238,7 +422,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                   ),
                   const SizedBox(height: 20),
                   // معلومات النظام
-                  _buildInfoCard(),
+                  // _buildInfoCard(),
                 ],
               ),
             ),
@@ -307,25 +491,25 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
     );
   }
 
-  Widget _buildInfoCard() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C2B30),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('ℹ️  معلومات', style: TextStyle(color: Colors.white38, fontSize: 12)),
-          const SizedBox(height: 6),
-          const Text(
-            'هذه الصفحة للمطور فقط.\nلفتحها: اضغط Ctrl + Alt + Shift ثم اكتب: d e v m h',
-            style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.6),
-          ),
-        ],
-      ),
-    );
-  }
+  // Widget _buildInfoCard() {
+  //   return Container(
+  //     padding: const EdgeInsets.all(12),
+  //     decoration: BoxDecoration(
+  //       color: const Color(0xFF1C2B30),
+  //       borderRadius: BorderRadius.circular(10),
+  //       border: Border.all(color: Colors.white12),
+  //     ),
+  //     child: Column(
+  //       crossAxisAlignment: CrossAxisAlignment.start,
+  //       children: [
+  //         const Text('ℹ️  معلومات', style: TextStyle(color: Colors.white38, fontSize: 12)),
+  //         const SizedBox(height: 6),
+  //         const Text(
+  //           'هذه الصفحة للمطور فقط.\nلفتحها: اضغط Ctrl + Alt + Shift ثم اكتب: d e v m h',
+  //           style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.6),
+  //         ),
+  //       ],
+  //     ),
+  //   );
+  // }
 }

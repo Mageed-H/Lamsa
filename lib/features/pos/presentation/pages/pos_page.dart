@@ -427,6 +427,9 @@ class _PosPageState extends State<PosPage> {
     final titleFs = double.tryParse(settings['receipt_title_font_size'] ?? '14') ?? 14.0;
     final bodyFs = double.tryParse(settings['receipt_body_font_size'] ?? '9') ?? 9.0;
     final paperW = double.tryParse(settings['receipt_paper_width_mm'] ?? '78') ?? 78.0;
+    final marginMm = double.tryParse(settings['receipt_margin_mm'] ?? '3') ?? 3.0;
+    final savedPrinterUrl = settings['default_printer_url'] ?? '';
+    final savedPrinterName = settings['default_printer_name'] ?? '';
 
     final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
     final aroFont = pw.Font.ttf(fontData);
@@ -450,7 +453,7 @@ class _PosPageState extends State<PosPage> {
     final pageFormat = PdfPageFormat(
       paperW * PdfPageFormat.mm,
       pageH * PdfPageFormat.mm,
-      marginAll: 3 * PdfPageFormat.mm,
+      marginAll: marginMm * PdfPageFormat.mm,
     );
 
     pw.TextStyle body() => pw.TextStyle(font: aroFont, fontSize: bodyFs);
@@ -461,22 +464,23 @@ class _PosPageState extends State<PosPage> {
     pw.TextStyle subTitleSt() => pw.TextStyle(font: aroFont, fontSize: titleFs - 2);
 
     final solidDiv = pw.Divider(thickness: 0.5, color: PdfColors.black);
-    // فاصل منقط بين المواد
-    final dottedDiv = pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 1),
+    // فاصل منقط يمتد على كامل عرض الفاتورة
+    final dottedDiv = pw.SizedBox(
+      height: 4,
       child: pw.Row(
         children: List.generate(
-          28,
-          (_) => pw.Expanded(
+          60,
+          (i) => pw.Expanded(
             child: pw.Container(
               height: 0.4,
-              margin: const pw.EdgeInsets.symmetric(horizontal: 0.6),
-              color: PdfColors.grey600,
+              color: i.isEven ? PdfColors.grey600 : PdfColors.white,
             ),
           ),
         ),
       ),
     );
+    // فاصل رأسي رفيع بين الأعمدة
+    final vSep = pw.Container(width: 0.4, color: PdfColors.grey500);
 
     // بناء بنود الفاتورة
     final List<pw.Widget> itemWidgets = [];
@@ -500,17 +504,17 @@ class _PosPageState extends State<PosPage> {
                   overflow: pw.TextOverflow.clip,
                 ),
               ),
-              pw.SizedBox(width: 2),
+              vSep,
               pw.SizedBox(
                 width: bodyFs * 3,
                 child: pw.Text('x$qty', style: body(), textAlign: pw.TextAlign.center),
               ),
-              pw.SizedBox(width: 2),
+              vSep,
               pw.SizedBox(
                 width: bodyFs * 5,
                 child: pw.Text('${product.price}', style: body(), textAlign: pw.TextAlign.center),
               ),
-              pw.SizedBox(width: 2),
+              vSep,
               pw.SizedBox(
                 width: bodyFs * 5.5,
                 child: pw.Text('$rowTotal', style: bodyBold(), textAlign: pw.TextAlign.left),
@@ -550,15 +554,15 @@ class _PosPageState extends State<PosPage> {
                       textDirection: pw.TextDirection.rtl,
                       textAlign: pw.TextAlign.right),
                 ),
-                pw.SizedBox(width: 2),
+                vSep,
                 pw.SizedBox(
                     width: bodyFs * 3,
                     child: pw.Text('العدد', style: bodyBold(), textAlign: pw.TextAlign.center)),
-                pw.SizedBox(width: 2),
+                vSep,
                 pw.SizedBox(
                     width: bodyFs * 5,
                     child: pw.Text('السعر', style: bodyBold(), textAlign: pw.TextAlign.center)),
-                pw.SizedBox(width: 2),
+                vSep,
                 pw.SizedBox(
                     width: bodyFs * 5.5,
                     child: pw.Text('الإجمالي', style: bodyBold(), textAlign: pw.TextAlign.left)),
@@ -631,6 +635,15 @@ class _PosPageState extends State<PosPage> {
       ),
     );
 
+    if (savedPrinterUrl.isNotEmpty) {
+      try {
+        final ok = await Printing.directPrintPdf(
+          printer: Printer(url: savedPrinterUrl, name: savedPrinterName),
+          onLayout: (_) => doc.save(),
+        );
+        if (ok) return;
+      } catch (_) {}
+    }
     await Printing.layoutPdf(onLayout: (_) => doc.save());
   }
 

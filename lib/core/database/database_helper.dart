@@ -24,7 +24,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 7, // الإصدار 7: إعدادات الطباعة (خط + عرض ورقة)
+      version: 8, // الإصدار 8: أبعاد الباركود + هوامش الطباعة + حفظ الطابعة
       onConfigure: _onConfigure, // تفعيل العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -60,6 +60,7 @@ class DatabaseHelper {
     await _createV5Tables(db);
     await _createV6Tables(db);
     await _createV7Tables(db);
+    await _createV8Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -86,6 +87,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 7) {
       await _createV7Tables(db);
+    }
+    if (oldVersion < 8) {
+      await _createV8Tables(db);
     }
   }
 
@@ -573,11 +577,22 @@ class DatabaseHelper {
   }
 
   Future _createV7Tables(Database db) async {
-    // إضافة إعدادات الطباعة الجديدة
     final batch = db.batch();
     batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_title_font_size', '14')");
     batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_body_font_size', '9')");
     batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_paper_width_mm', '78')");
+    await batch.commit(noResult: true);
+  }
+
+  Future _createV8Tables(Database db) async {
+    // إعدادات أبعاد الباركود + هوامش الطباعة + الطابعة الافتراضية
+    final batch = db.batch();
+    batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('barcode_label_width_mm', '60')");
+    batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('barcode_label_height_mm', '35')");
+    batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('barcode_inner_padding_mm', '3')");
+    batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_margin_mm', '3')");
+    batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('default_printer_url', '')");
+    batch.rawInsert("INSERT OR IGNORE INTO settings (key, value) VALUES ('default_printer_name', '')");
     await batch.commit(noResult: true);
   }
 
