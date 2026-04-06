@@ -25,6 +25,8 @@ class _PosPageState extends State<PosPage> {
   // سلة المشتريات (الفاتورة الحالية): نحفظ بيها المنتج والكمية
   final List<Map<String, dynamic>> _cart = [];
   bool _hasSuspendedOrders = false;
+  // منتجات المخزون المنخفض
+  List<ProductModel> _lowStockProducts = [];
   // قائمة جميع المنتجات (للبحث)
   List<ProductModel> _allProducts = [];
   // الخصم
@@ -61,16 +63,22 @@ class _PosPageState extends State<PosPage> {
     super.dispose();
   }
 
+  // تنظيف مدخلات الماسح الضوئي من الرموز الزائدة (مثل {#\ اللي تطلع من تبديل أنماط Code128)
+  String _cleanBarcode(String raw) {
+    return raw.trim().replaceAll(RegExp(r'[^a-zA-Z0-9\-]'), '');
+  }
+
   // الدالة السحرية اللي تشتغل من نضرب الباركود بالجهاز
   Future<void> _onBarcodeScanned(String barcode) async {
-    if (barcode.trim().isEmpty) {
+    final cleanBarcode = _cleanBarcode(barcode);
+    if (cleanBarcode.isEmpty) {
       _keepFocus();
       return;
     }
 
     // نبحث عن المنتج بقاعدة البيانات المحلية (بسرعة البرق)
     final product = await DatabaseHelper.instance.getProductByBarcode(
-      barcode.trim(),
+      cleanBarcode,
     );
 
     if (product != null) {
@@ -931,6 +939,65 @@ class _PosPageState extends State<PosPage> {
     await Printing.layoutPdf(onLayout: (_) => doc.save());
   }
 
+  // عرض المنتجات ذات المخزون المنخفض
+  void _showLowStockDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: AppTheme.warningColor),
+            const SizedBox(width: 8),
+            Text(
+              'المخزون المنخفض (${_lowStockProducts.length})',
+              style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: _lowStockProducts.isEmpty
+              ? const Center(child: Text('لا توجد منتجات بمخزون منخفض ✓', style: TextStyle(color: AppTheme.successColor, fontWeight: FontWeight.bold)))
+              : ListView.separated(
+                  itemCount: _lowStockProducts.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (_, index) {
+                    final p = _lowStockProducts[index];
+                    final isZero = p.stock <= 0;
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        isZero ? Icons.error : Icons.warning,
+                        color: isZero ? AppTheme.errorColor : AppTheme.warningColor,
+                      ),
+                      title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text('${p.category} ${p.color.isNotEmpty ? '- ${p.color}' : ''} ${p.size.isNotEmpty ? '- ${p.size}' : ''}'),
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isZero ? AppTheme.errorColor : AppTheme.warningColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '${p.stock}',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إغلاق'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // عرض الفواتير المعلقة واستئنافها
   Future<void> _showSuspendedOrders() async {
     final orders = await DatabaseHelper.instance.getSuspendedOrders();
@@ -1095,7 +1162,18 @@ class _PosPageState extends State<PosPage> {
   // ─── تحميل جميع المنتجات ───
   Future<void> _loadAllProducts() async {
     final products = await DatabaseHelper.instance.getAllProducts();
-    if (mounted) setState(() => _allProducts = products);
+    final thresholdStr = await DatabaseHelper.instance.getSetting(
+      'low_stock_threshold',
+      defaultValue: '5',
+    );
+    final threshold = int.tryParse(thresholdStr) ?? 5;
+    final lowStock = products.where((p) => p.stock <= threshold && p.stock >= 0).toList();
+    if (mounted) {
+      setState(() {
+        _allProducts = products;
+        _lowStockProducts = lowStock;
+      });
+    }
   }
 
   // ─── حوار الخصم ───
@@ -1346,6 +1424,34 @@ class _PosPageState extends State<PosPage> {
             ),
             onPressed: _showSuspendedOrders,
             tooltip: 'الفواتير المعلقة',
+          ),
+          // زر المخزون المنخفض مع عدد المنتجات
+          IconButton(
+            icon: Stack(
+              children: [
+                const Icon(Icons.inventory_2_outlined),
+                if (_lowStockProducts.isNotEmpty)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                      decoration: const BoxDecoration(
+                        color: AppTheme.warningColor,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '${_lowStockProducts.length}',
+                        style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            onPressed: _showLowStockDialog,
+            tooltip: 'المخزون المنخفض',
           ),
           // زر البحث عن منتج
           IconButton(

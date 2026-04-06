@@ -69,16 +69,16 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   Barcode _detectBarcodeType() {
     final code = widget.barcode;
     if (code.contains(RegExp(r'[a-zA-Z\-]'))) {
-      return Barcode.code128();
+      return Barcode.code128(useCode128A: false, useCode128C: false);
     }
     if (code.length == 13 && RegExp(r'^\d+$').hasMatch(code)) {
-      return Barcode.ean13();
+      try { Barcode.ean13().verify(code); return Barcode.ean13(); } catch (_) {}
     }
     if (code.length == 8 && RegExp(r'^\d+$').hasMatch(code)) {
-      return Barcode.ean8();
+      try { Barcode.ean8().verify(code); return Barcode.ean8(); } catch (_) {}
     }
     if (code.length == 12 && RegExp(r'^\d+$').hasMatch(code)) {
-      return Barcode.upcA();
+      try { Barcode.upcA().verify(code); return Barcode.upcA(); } catch (_) {}
     }
     return Barcode.code128();
   }
@@ -86,16 +86,16 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   pw.Barcode _detectPdfBarcodeType() {
     final code = widget.barcode;
     if (code.contains(RegExp(r'[a-zA-Z\-]'))) {
-      return pw.Barcode.code128();
+      return pw.Barcode.code128(useCode128A: false, useCode128C: false);
     }
     if (code.length == 13 && RegExp(r'^\d+$').hasMatch(code)) {
-      return pw.Barcode.ean13();
+      try { pw.Barcode.ean13().verify(code); return pw.Barcode.ean13(); } catch (_) {}
     }
     if (code.length == 8 && RegExp(r'^\d+$').hasMatch(code)) {
-      return pw.Barcode.ean8();
+      try { pw.Barcode.ean8().verify(code); return pw.Barcode.ean8(); } catch (_) {}
     }
     if (code.length == 12 && RegExp(r'^\d+$').hasMatch(code)) {
-      return pw.Barcode.upcA();
+      try { pw.Barcode.upcA().verify(code); return pw.Barcode.upcA(); } catch (_) {}
     }
     return pw.Barcode.code128();
   }

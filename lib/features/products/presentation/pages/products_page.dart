@@ -141,13 +141,15 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
     );
   }
 
-  // توليد باركود محلي فريد
+  // توليد باركود محلي فريد (رقمي 11 رقم يبدأ بـ 000 لتجنب التعارض مع EAN/UPC)
   Future<void> _generateCustomBarcode() async {
     String barcode;
     bool exists;
     do {
       final uniqueId = DateTime.now().millisecondsSinceEpoch.toString();
-      barcode = 'LOC-${uniqueId.substring(uniqueId.length - 8)}';
+      // نأخذ آخر 8 أرقام من الـ timestamp
+      final suffix = uniqueId.substring(uniqueId.length - 8);
+      barcode = '000$suffix'; // دائماً 11 رقم (ما يطابق EAN-8/13 أو UPC-A)
       exists = await DatabaseHelper.instance.barcodeExists(barcode);
       if (exists) await Future.delayed(const Duration(milliseconds: 2));
     } while (exists);
@@ -163,6 +165,21 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
       if (_selectedCategory == null) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الرجاء اختيار قسم أو إضافة قسم جديد')));
         return;
+      }
+
+      // التحقق من تكرار الباركود قبل الحفظ
+      final barcode = _barcodeController.text.trim();
+      if (barcode.isNotEmpty) {
+        final exists = await DatabaseHelper.instance.barcodeExists(barcode);
+        if (exists) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('هذا الباركود مستخدم مسبقاً! غيّره أو ولّد باركود جديد'),
+              backgroundColor: AppTheme.errorColor,
+            ));
+          }
+          return;
+        }
       }
 
       // تحضير كائن المنتج للحفظ (مع حماية صارمة من أخطاء التحويل)
@@ -197,19 +214,25 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
     }
   }
 
+  // تنظيف مدخلات الماسح الضوئي من الرموز الزائدة
+  String _cleanBarcode(String raw) {
+    return raw.trim().replaceAll(RegExp(r'[^a-zA-Z0-9\-]'), '');
+  }
+
   // عند مسح باركود في تبويب إضافة منتج → يبقى النص في الحقل ويظهر تأكيد
   void _onAddProductScan(String barcode) {
-    if (barcode.trim().isEmpty) {
+    final cleanBarcode = _cleanBarcode(barcode);
+    if (cleanBarcode.isEmpty) {
       _barcodeFocusNode.requestFocus();
       return;
     }
     setState(() {
-      _barcodeController.text = barcode.trim();
+      _barcodeController.text = cleanBarcode;
       _isCustomBarcode = false;
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('تم قراءة الباركود: ${barcode.trim()}'),
+        content: Text('تم قراءة الباركود: $cleanBarcode'),
         backgroundColor: AppTheme.successColor,
         duration: const Duration(seconds: 2),
       ));
@@ -220,13 +243,14 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   // عند مسح باركود في تبويب القائمة → يتنقل للمنتج ويلوّنه
   // يبحث بجدول product_barcodes لدعم الباركودات المتعددة
   Future<void> _onProductsListScan(String barcode) async {
-    if (barcode.trim().isEmpty) {
+    final cleanBarcode = _cleanBarcode(barcode);
+    if (cleanBarcode.isEmpty) {
       _listScanFocusNode.requestFocus();
       return;
     }
     _listScanController.clear();
     // بحث عبر قاعدة البيانات لدعم الباركودات المتعددة
-    final product = await DatabaseHelper.instance.getProductByBarcode(barcode.trim());
+    final product = await DatabaseHelper.instance.getProductByBarcode(cleanBarcode);
     final index = product != null
         ? _allProducts.indexWhere((p) => p.id == product.id)
         : -1;
@@ -638,9 +662,14 @@ class _EditProductDialogState extends State<_EditProductDialog> {
     if (mounted) setState(() { _barcodes = List<Map<String, dynamic>>.from(list); _barcodesLoading = false; });
   }
 
+  // تنظيف مدخلات الماسح الضوئي من الرموز الزائدة
+  String _cleanBarcode(String raw) {
+    return raw.trim().replaceAll(RegExp(r'[^a-zA-Z0-9\-]'), '');
+  }
+
   Future<void> _addBarcode() async {
     final ctrl = TextEditingController();
-    final barcode = await showDialog<String>(
+    final rawBarcode = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('إضافة باركود', style: TextStyle(color: AppTheme.primaryColor)),
@@ -667,7 +696,7 @@ class _EditProductDialogState extends State<_EditProductDialog> {
         ],
       ),
     );
-    ctrl.dispose();
+    final barcode = rawBarcode != null ? _cleanBarcode(rawBarcode) : null;
     if (barcode == null || barcode.isEmpty) return;
     final exists = await DatabaseHelper.instance.barcodeExists(barcode);
     if (exists) {
@@ -684,7 +713,7 @@ class _EditProductDialogState extends State<_EditProductDialog> {
 
   Future<void> _editBarcode(Map<String, dynamic> entry) async {
     final ctrl = TextEditingController(text: entry['barcode'] as String);
-    final newBarcode = await showDialog<String>(
+    final rawBarcode = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('تعديل الباركود', style: TextStyle(color: AppTheme.primaryColor)),
@@ -710,7 +739,7 @@ class _EditProductDialogState extends State<_EditProductDialog> {
         ],
       ),
     );
-    ctrl.dispose();
+    final newBarcode = rawBarcode != null ? _cleanBarcode(rawBarcode) : null;
     if (newBarcode == null || newBarcode.isEmpty || newBarcode == entry['barcode']) { return; }
     final exists = await DatabaseHelper.instance.barcodeExists(newBarcode);
     if (exists) {
