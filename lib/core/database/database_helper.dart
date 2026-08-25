@@ -8,10 +8,19 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
-  /// يُستخدم لإشعار الصفحات بأي تغيير في البيانات (مبيعات، منتجات...)
+  /// إشعارات منفصلة لكل نوع بيانات — كل صفحة تسمع فقط لتغييراتها
+  static final ValueNotifier<int> productsRevision = ValueNotifier(0);
+  static final ValueNotifier<int> salesRevision = ValueNotifier(0);
+  static final ValueNotifier<int> debtsRevision = ValueNotifier(0);
+  static final ValueNotifier<int> expensesRevision = ValueNotifier(0);
+  /// للتوافق مع الكود القديم — يarten جميع الإشعارات
   static final ValueNotifier<int> revision = ValueNotifier(0);
 
   DatabaseHelper._init();
+
+  static void _notifyAll() {
+    revision.value++;
+  }
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -38,7 +47,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 9, // الإصدار 9: حفظ الخصم بالمبيعات والفواتير المعلقة
+      version: 12, // الإصدار 12: ديون المحل والمصروفات
       onConfigure: _onConfigure, // تفعيل العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -156,6 +165,9 @@ class DatabaseHelper {
     await _createV7Tables(db);
     await _createV8Tables(db);
     await _createV9Tables(db);
+    await _createV10Tables(db);
+    await _createV11Tables(db);
+    await _createV12Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -189,6 +201,15 @@ class DatabaseHelper {
     if (oldVersion < 9) {
       await _createV9Tables(db);
     }
+    if (oldVersion < 10) {
+      await _createV10Tables(db);
+    }
+    if (oldVersion < 11) {
+      await _createV11Tables(db);
+    }
+    if (oldVersion < 12) {
+      await _createV12Tables(db);
+    }
   }
 
   Future _createV4Tables(Database db) async {
@@ -215,8 +236,9 @@ class DatabaseHelper {
     ''');
     
     // إضافة أقسام افتراضية للمحل
-    await db.insert('categories', {'name': 'ملافع'});
-    await db.insert('categories', {'name': 'داخليات'});
+    await db.insert('categories', {'name': 'مكياج'});
+    await db.insert('categories', {'name': 'عطور'});
+    await db.insert('categories', {'name': 'عناية بالبشرة'});
 
     // 3. جدول الطلبات المعلقة (الفاتورة الأساسية)
     await db.execute('''
@@ -311,7 +333,7 @@ class DatabaseHelper {
           }, conflictAlgorithm: ConflictAlgorithm.ignore);
         }
       });
-      if (productId > 0) revision.value++;
+      if (productId > 0) { productsRevision.value++; _notifyAll(); }
       return productId;
     } catch (e) {
       print('Error inserting product: $e');
@@ -367,7 +389,8 @@ class DatabaseHelper {
                 where: 'id = ?', whereArgs: [product.id]);
           }
         }
-        revision.value++;
+        productsRevision.value++;
+        _notifyAll();
       }
       return rows;
     } catch (e) {
@@ -400,6 +423,43 @@ class DatabaseHelper {
     }
   }
 
+  Future<int> updateCategory(String oldName, String newName) async {
+    try {
+      final db = await instance.database;
+      final rows = await db.update(
+        'categories',
+        {'name': newName},
+        where: 'name = ?',
+        whereArgs: [oldName],
+      );
+      if (rows > 0) {
+        await db.update('products', {'category': newName}, where: 'category = ?', whereArgs: [oldName]);
+        productsRevision.value++;
+        _notifyAll();
+      }
+      return rows;
+    } catch (e) {
+      print('Error updating category: $e');
+      return 0;
+    }
+  }
+
+  Future<int> deleteCategory(String name) async {
+    try {
+      final db = await instance.database;
+      final count = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM products WHERE category = ?', [name]),
+      );
+      if (count != null && count > 0) return -1;
+      final rows = await db.delete('categories', where: 'name = ?', whereArgs: [name]);
+      if (rows > 0) { productsRevision.value++; _notifyAll(); }
+      return rows;
+    } catch (e) {
+      print('Error deleting category: $e');
+      return 0;
+    }
+  }
+
   // ==========================================================
   // دوال مساعدة للباركود والحذف
   // ==========================================================
@@ -419,7 +479,7 @@ class DatabaseHelper {
     try {
       final db = await instance.database;
       final rows = await db.delete('products', where: 'id = ?', whereArgs: [id]);
-      if (rows > 0) revision.value++;
+      if (rows > 0) { productsRevision.value++; _notifyAll(); }
       return rows;
     } catch (e) {
       print('Error deleting product: $e');
@@ -539,6 +599,7 @@ class DatabaseHelper {
 
   /// إتمام عملية البيع: حفظ الفاتورة + تخفيض المخزون (Transactional)
   Future<int> completeSale(List<Map<String, dynamic>> cart, {int discountValue = 0}) async {
+    try {
     final db = await instance.database;
     int saleId = -1;
     await db.transaction((txn) async {
@@ -549,8 +610,11 @@ class DatabaseHelper {
       for (final item in cart) {
         final product = item['product'] as ProductModel;
         final qty = item['quantity'] as int;
-        subtotal += product.price * qty;
-        itemsProfit += product.profit * qty;
+        final itemPrice = (item['custom_price'] as int?) ?? product.price;
+        final itemDiscount = (item['item_discount'] as int?) ?? 0;
+        final effectivePrice = itemPrice - itemDiscount;
+        subtotal += effectivePrice * qty;
+        itemsProfit += (effectivePrice - product.purchasePrice) * qty;
         itemsCount += qty;
       }
 
@@ -566,23 +630,34 @@ class DatabaseHelper {
       for (final item in cart) {
         final product = item['product'] as ProductModel;
         final qty = item['quantity'] as int;
+        final itemPrice = (item['custom_price'] as int?) ?? product.price;
+        final itemDiscount = (item['item_discount'] as int?) ?? 0;
+        final effectivePrice = itemPrice - itemDiscount;
         await txn.insert('sale_items', {
           'sale_id': saleId,
           'product_id': product.id,
           'product_name': product.name,
           'quantity': qty,
-          'unit_price': product.price,
+          'unit_price': effectivePrice,
           'purchase_price': product.purchasePrice,
         });
-        // تخفيض المخزون
-        await txn.rawUpdate(
-          'UPDATE products SET stock = stock - ? WHERE id = ?',
-          [qty, product.id],
+        // تخفيض المخزون (حماية من السالب)
+        final updated = await txn.rawUpdate(
+          'UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?',
+          [qty, product.id, qty],
         );
+        if (updated == 0) {
+          throw Exception('المخزون غير كافٍ للمنتج "${product.name}"');
+        }
       }
     });
-    if (saleId > 0) revision.value++;
+    if (saleId > 0) { salesRevision.value++; productsRevision.value++; _notifyAll(); }
     return saleId;
+    } catch (e, st) {
+      print('ERROR completeSale: $e');
+      print(st);
+      return -1;
+    }
   }
 
   /// جلب تفاصيل فاتورة معينة
@@ -666,7 +741,7 @@ class DatabaseHelper {
     ''');
     // القيم الافتراضية
     final defaults = {
-      'store_name': 'لمسة',
+      'store_name': 'أحلى الحلوين',
       'store_phone': '',
       'currency': 'دينار',
       'low_stock_threshold': '5',
@@ -750,6 +825,88 @@ class DatabaseHelper {
     try { await db.execute('ALTER TABLE suspended_orders ADD COLUMN is_discount_percent INTEGER DEFAULT 0'); } catch (_) {}
   }
 
+  // ==========================================================
+  // الإصدار 10: جدول الديون
+  // ==========================================================
+  Future _createV10Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS debts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_name TEXT NOT NULL,
+        phone TEXT,
+        amount INTEGER NOT NULL,
+        paid INTEGER NOT NULL DEFAULT 0,
+        note TEXT,
+        sale_id INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE SET NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_debts_customer ON debts (customer_name);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_debts_date ON debts (created_at);');
+  }
+
+  // ==========================================================
+  // الإصدار 11: جدول سجل الدفعات
+  // ==========================================================
+  Future _createV11Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS debt_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        debt_id INTEGER NOT NULL,
+        amount INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (debt_id) REFERENCES debts (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_dp_debt ON debt_payments (debt_id);');
+  }
+
+  // ==========================================================
+  // الإصدار 12: ديون المحل والمصروفات
+  // ==========================================================
+  Future _createV12Tables(Database db) async {
+    // ديون المحل (المطلوب من المحل للمندوبين/الشركات)
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS shop_debts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        supplier_name TEXT NOT NULL,
+        phone TEXT,
+        amount INTEGER NOT NULL,
+        paid INTEGER NOT NULL DEFAULT 0,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sd_supplier ON shop_debts (supplier_name);');
+
+    // سجل دفعات ديون المحل
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS shop_debt_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        debt_id INTEGER NOT NULL,
+        amount INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (debt_id) REFERENCES shop_debts (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sdp_debt ON shop_debt_payments (debt_id);');
+
+    // المصروفات العامة
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        note TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses (created_at);');
+  }
+
   /// جلب بيانات الخصم من فاتورة معلقة
   Future<Map<String, int>> getSuspendedOrderDiscount(int orderId) async {
     try {
@@ -779,7 +936,9 @@ class DatabaseHelper {
         await txn.delete('sale_items', where: 'sale_id = ?', whereArgs: [saleId]);
         await txn.delete('sales', where: 'id = ?', whereArgs: [saleId]);
       });
-      revision.value++;
+      salesRevision.value++;
+      productsRevision.value++;
+      _notifyAll();
       return true;
     } catch (e) {
       print('Error returning sale: $e');
@@ -847,7 +1006,9 @@ class DatabaseHelper {
           ''', [returnedAmount, returnedProfit, returnedCount, saleId]);
         }
       });
-      revision.value++;
+      salesRevision.value++;
+      productsRevision.value++;
+      _notifyAll();
       return true;
     } catch (e) {
       print('Error partial return: $e');
@@ -869,6 +1030,534 @@ class DatabaseHelper {
       return map;
     } catch (e) {
       return {};
+    }
+  }
+
+  // ==========================================================
+  // دوال الديون (Debts CRUD)
+  // ==========================================================
+
+  /// إضافة دين جديد
+  Future<int> insertDebt({
+    required String customerName,
+    String? phone,
+    required int amount,
+    String? note,
+    int? saleId,
+  }) async {
+    try {
+      final db = await instance.database;
+      final now = DateTime.now().toIso8601String();
+      final id = await db.insert('debts', {
+        'customer_name': customerName.trim(),
+        'phone': phone?.trim(),
+        'amount': amount,
+        'paid': 0,
+        'note': note?.trim(),
+        'sale_id': saleId,
+        'created_at': now,
+        'updated_at': now,
+      });
+      if (id > 0) { debtsRevision.value++; _notifyAll(); }
+      return id;
+    } catch (e) {
+      print('Error inserting debt: $e');
+      return -1;
+    }
+  }
+
+  /// جلب كل الديون (مرتبة من الأحدث)
+  Future<List<Map<String, dynamic>>> getAllDebts() async {
+    try {
+      final db = await instance.database;
+      return await db.query('debts', orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// جلب الديون غير المسددة فقط
+  Future<List<Map<String, dynamic>>> getUnpaidDebts() async {
+    try {
+      final db = await instance.database;
+      return await db.query(
+        'debts',
+        where: 'amount > paid',
+        orderBy: 'created_at DESC',
+      );
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// جلب دين واحد بالتفاصيل
+  Future<Map<String, dynamic>?> getDebtById(int id) async {
+    try {
+      final db = await instance.database;
+      final rows = await db.query('debts', where: 'id = ?', whereArgs: [id]);
+      return rows.isNotEmpty ? rows.first : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// تسجيل دفعة على دين
+  Future<bool> payDebt(int debtId, int payAmount) async {
+    try {
+      final db = await instance.database;
+      await db.transaction((txn) async {
+        final rows = await txn.query('debts', where: 'id = ?', whereArgs: [debtId]);
+        if (rows.isEmpty) return;
+
+        final currentPaid = rows.first['paid'] as int? ?? 0;
+        final totalAmount = rows.first['amount'] as int? ?? 0;
+        final newPaid = (currentPaid + payAmount).clamp(0, totalAmount);
+
+        await txn.update(
+          'debts',
+          {
+            'paid': newPaid,
+            'updated_at': DateTime.now().toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: [debtId],
+        );
+
+        // تسجيل الدفعة في جدول السجل
+        await txn.insert('debt_payments', {
+          'debt_id': debtId,
+          'amount': payAmount,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      });
+      debtsRevision.value++;
+      _notifyAll();
+      return true;
+    } catch (e) {
+      print('Error paying debt: $e');
+      return false;
+    }
+  }
+
+  /// تعديل دين
+  Future<bool> updateDebt(int debtId, {
+    String? customerName,
+    String? phone,
+    int? amount,
+    int? paid,
+    String? note,
+  }) async {
+    try {
+      final db = await instance.database;
+      final updates = <String, dynamic>{
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      if (customerName != null) updates['customer_name'] = customerName.trim();
+      if (phone != null) updates['phone'] = phone.trim();
+      if (amount != null) updates['amount'] = amount;
+      if (paid != null) updates['paid'] = paid;
+      if (note != null) updates['note'] = note.trim();
+
+      await db.update('debts', updates, where: 'id = ?', whereArgs: [debtId]);
+      debtsRevision.value++;
+      _notifyAll();
+      return true;
+    } catch (e) {
+      print('Error updating debt: $e');
+      return false;
+    }
+  }
+
+  /// حذف دين
+  Future<bool> deleteDebt(int debtId) async {
+    try {
+      final db = await instance.database;
+      await db.delete('debts', where: 'id = ?', whereArgs: [debtId]);
+      debtsRevision.value++;
+      _notifyAll();
+      return true;
+    } catch (e) {
+      print('Error deleting debt: $e');
+      return false;
+    }
+  }
+
+  /// جلب سجل الدفعات لدين معين
+  Future<List<Map<String, dynamic>>> getDebtPayments(int debtId) async {
+    try {
+      final db = await instance.database;
+      return await db.query(
+        'debt_payments',
+        where: 'debt_id = ?',
+        whereArgs: [debtId],
+        orderBy: 'created_at DESC',
+      );
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// ملخص الديون (الإجمالي + المدفوع + المتبقي + عدد)
+  Future<Map<String, int>> getDebtsSummary() async {
+    try {
+      final db = await instance.database;
+      final result = await db.rawQuery(
+        'SELECT COALESCE(SUM(amount), 0) as total, COALESCE(SUM(paid), 0) as paid, COUNT(*) as count FROM debts',
+      );
+      final total = result.first['total'] as int? ?? 0;
+      final paid = result.first['paid'] as int? ?? 0;
+      final count = result.first['count'] as int? ?? 0;
+      return {
+        'total': total,
+        'paid': paid,
+        'remaining': total - paid,
+        'count': count,
+      };
+    } catch (e) {
+      return {'total': 0, 'paid': 0, 'remaining': 0, 'count': 0};
+    }
+  }
+
+  /// رأس المال الحقيقي = مجموع (المخزون × سعر الشراء) لكل المنتجات
+  Future<int> getTotalInventoryValue() async {
+    try {
+      final db = await instance.database;
+      final result = await db.rawQuery(
+        'SELECT COALESCE(SUM(stock * purchase_price), 0) as total FROM products',
+      );
+      return result.first['total'] as int? ?? 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // ==========================================================
+  // دوال ديون المحل (Shop Debts)
+  // ==========================================================
+
+  Future<int> insertShopDebt({
+    required String supplierName,
+    String? phone,
+    required int amount,
+    String? note,
+  }) async {
+    try {
+      final db = await instance.database;
+      final now = DateTime.now().toIso8601String();
+      final id = await db.insert('shop_debts', {
+        'supplier_name': supplierName.trim(),
+        'phone': phone?.trim(),
+        'amount': amount,
+        'paid': 0,
+        'note': note?.trim(),
+        'created_at': now,
+        'updated_at': now,
+      });
+      if (id > 0) { debtsRevision.value++; _notifyAll(); }
+      return id;
+    } catch (e) {
+      print('Error inserting shop debt: $e');
+      return -1;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getAllShopDebts() async {
+    try {
+      final db = await instance.database;
+      return await db.query('shop_debts', orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<bool> payShopDebt(int debtId, int payAmount) async {
+    try {
+      final db = await instance.database;
+      await db.transaction((txn) async {
+        final rows = await txn.query('shop_debts', where: 'id = ?', whereArgs: [debtId]);
+        if (rows.isEmpty) return;
+        final currentPaid = rows.first['paid'] as int? ?? 0;
+        final totalAmount = rows.first['amount'] as int? ?? 0;
+        final newPaid = (currentPaid + payAmount).clamp(0, totalAmount);
+        await txn.update('shop_debts', {
+          'paid': newPaid,
+          'updated_at': DateTime.now().toIso8601String(),
+        }, where: 'id = ?', whereArgs: [debtId]);
+        await txn.insert('shop_debt_payments', {
+          'debt_id': debtId,
+          'amount': payAmount,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      });
+      debtsRevision.value++;
+      _notifyAll();
+      return true;
+    } catch (e) {
+      print('Error paying shop debt: $e');
+      return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getShopDebtPayments(int debtId) async {
+    try {
+      final db = await instance.database;
+      return await db.query('shop_debt_payments',
+          where: 'debt_id = ?', whereArgs: [debtId], orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<bool> updateShopDebt(int debtId, {String? supplierName, String? phone, int? amount, String? note}) async {
+    try {
+      final db = await instance.database;
+      final updates = <String, dynamic>{'updated_at': DateTime.now().toIso8601String()};
+      if (supplierName != null) updates['supplier_name'] = supplierName.trim();
+      if (phone != null) updates['phone'] = phone.trim();
+      if (amount != null) updates['amount'] = amount;
+      if (note != null) updates['note'] = note.trim();
+      await db.update('shop_debts', updates, where: 'id = ?', whereArgs: [debtId]);
+      debtsRevision.value++;
+      _notifyAll();
+      return true;
+    } catch (e) {
+      print('Error updating shop debt: $e');
+      return false;
+    }
+  }
+
+  Future<bool> deleteShopDebt(int debtId) async {
+    try {
+      final db = await instance.database;
+      await db.delete('shop_debts', where: 'id = ?', whereArgs: [debtId]);
+      debtsRevision.value++;
+      _notifyAll();
+      return true;
+    } catch (e) {
+      print('Error deleting shop debt: $e');
+      return false;
+    }
+  }
+
+  Future<Map<String, int>> getShopDebtsSummary() async {
+    try {
+      final db = await instance.database;
+      final result = await db.rawQuery(
+        'SELECT COALESCE(SUM(amount), 0) as total, COALESCE(SUM(paid), 0) as paid, COUNT(*) as count FROM shop_debts',
+      );
+      final total = result.first['total'] as int? ?? 0;
+      final paid = result.first['paid'] as int? ?? 0;
+      return {
+        'total': total,
+        'paid': paid,
+        'remaining': total - paid,
+        'count': result.first['count'] as int? ?? 0,
+      };
+    } catch (e) {
+      return {'total': 0, 'paid': 0, 'remaining': 0, 'count': 0};
+    }
+  }
+
+  // ==========================================================
+  // دوال المصروفات (Expenses)
+  // ==========================================================
+
+  Future<int> insertExpense({
+    required String category,
+    required int amount,
+    String? note,
+  }) async {
+    try {
+      final db = await instance.database;
+      final id = await db.insert('expenses', {
+        'category': category.trim(),
+        'amount': amount,
+        'note': note?.trim(),
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      if (id > 0) { expensesRevision.value++; _notifyAll(); }
+      return id;
+    } catch (e) {
+      print('Error inserting expense: $e');
+      return -1;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getAllExpenses() async {
+    try {
+      final db = await instance.database;
+      return await db.query('expenses', orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<bool> deleteExpense(int id) async {
+    try {
+      final db = await instance.database;
+      await db.delete('expenses', where: 'id = ?', whereArgs: [id]);
+      expensesRevision.value++;
+      _notifyAll();
+      return true;
+    } catch (e) {
+      print('Error deleting expense: $e');
+      return false;
+    }
+  }
+
+  Future<Map<String, int>> getExpensesSummary() async {
+    try {
+      final db = await instance.database;
+      final today = DateTime.now().toIso8601String().substring(0, 10);
+      final todayResult = await db.rawQuery(
+        "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE created_at LIKE ?",
+        ['$today%'],
+      );
+      final allResult = await db.rawQuery(
+        'SELECT COALESCE(SUM(amount), 0) as total FROM expenses',
+      );
+      return {
+        'today': todayResult.first['total'] as int? ?? 0,
+        'all': allResult.first['total'] as int? ?? 0,
+      };
+    } catch (e) {
+      return {'today': 0, 'all': 0};
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getExpensesByDateRange(String from, String to) async {
+    try {
+      final db = await instance.database;
+      return await db.query('expenses',
+          where: "created_at >= ? AND created_at < ?",
+          whereArgs: [from, to],
+          orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<Map<String, int>> getExpensesSummaryByDateRange(String from, String to) async {
+    try {
+      final db = await instance.database;
+      final result = await db.rawQuery(
+        "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE created_at >= ? AND created_at < ?",
+        [from, to],
+      );
+      return {'total': result.first['total'] as int? ?? 0};
+    } catch (e) {
+      return {'total': 0};
+    }
+  }
+
+  Future<Map<String, dynamic>> getZReportData() async {
+    try {
+      final db = await instance.database;
+      final today = DateTime.now().toIso8601String().substring(0, 10);
+
+      final sales = await db.rawQuery(
+        "SELECT COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(items_count), 0) as items, COUNT(*) as count FROM sales WHERE created_at LIKE ?",
+        ['$today%'],
+      );
+      final expenses = await db.rawQuery(
+        "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE created_at LIKE ?",
+        ['$today%'],
+      );
+      final debtsPaid = await db.rawQuery(
+        "SELECT COALESCE(SUM(dp.amount), 0) as total FROM debt_payments dp JOIN debts d ON dp.debt_id = d.id WHERE dp.created_at LIKE ?",
+        ['$today%'],
+      );
+      final shopDebtsPaid = await db.rawQuery(
+        "SELECT COALESCE(SUM(sdp.amount), 0) as total FROM shop_debt_payments sdp JOIN shop_debts sd ON sdp.shop_debt_id = sd.id WHERE sdp.created_at LIKE ?",
+        ['$today%'],
+      );
+
+      final topProducts = await db.rawQuery(
+        """SELECT si.product_name, SUM(si.quantity) as total_qty, SUM(si.unit_price * si.quantity) as total_revenue
+           FROM sale_items si
+           JOIN sales s ON si.sale_id = s.id
+           WHERE s.created_at LIKE ?
+           GROUP BY si.product_name
+           ORDER BY total_qty DESC
+           LIMIT 5""",
+        ['$today%'],
+      );
+
+      return {
+        'revenue': sales.first['revenue'] as int? ?? 0,
+        'profit': sales.first['profit'] as int? ?? 0,
+        'items_sold': sales.first['items'] as int? ?? 0,
+        'sales_count': sales.first['count'] as int? ?? 0,
+        'expenses': expenses.first['total'] as int? ?? 0,
+        'debts_collected': debtsPaid.first['total'] as int? ?? 0,
+        'shop_debts_collected': shopDebtsPaid.first['total'] as int? ?? 0,
+        'top_products': topProducts,
+      };
+    } catch (e) {
+      return {
+        'revenue': 0, 'profit': 0, 'items_sold': 0, 'sales_count': 0,
+        'expenses': 0, 'debts_collected': 0, 'shop_debts_collected': 0,
+        'top_products': <Map<String, dynamic>>[],
+      };
+    }
+  }
+
+  // ─── Paginated Queries ───
+
+  Future<List<Map<String, dynamic>>> getDebtsPaginated(int page, int pageSize) async {
+    try {
+      final db = await instance.database;
+      final offset = page * pageSize;
+      return await db.query('debts', orderBy: 'created_at DESC', limit: pageSize, offset: offset);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getShopDebtsPaginated(int page, int pageSize) async {
+    try {
+      final db = await instance.database;
+      final offset = page * pageSize;
+      return await db.query('shop_debts', orderBy: 'created_at DESC', limit: pageSize, offset: offset);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getExpensesPaginated(int page, int pageSize) async {
+    try {
+      final db = await instance.database;
+      final offset = page * pageSize;
+      return await db.query('expenses', orderBy: 'created_at DESC', limit: pageSize, offset: offset);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<List<ProductModel>> getProductsPaginated(int page, int pageSize) async {
+    try {
+      final db = await instance.database;
+      final offset = page * pageSize;
+      final maps = await db.query('products', orderBy: 'created_at DESC', limit: pageSize, offset: offset);
+      return maps.map((m) => ProductModel.fromMap(m)).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getSalesPaginated(int page, int pageSize, {String? from, String? to}) async {
+    try {
+      final db = await instance.database;
+      final offset = page * pageSize;
+      String where = '';
+      List<dynamic> args = [];
+      if (from != null && to != null) {
+        where = 'created_at >= ? AND created_at < ?';
+        args = [from, to];
+      }
+      return await db.query('sales', where: where.isEmpty ? null : where, whereArgs: args.isEmpty ? null : args, orderBy: 'created_at DESC', limit: pageSize, offset: offset);
+    } catch (e) {
+      return [];
     }
   }
 }

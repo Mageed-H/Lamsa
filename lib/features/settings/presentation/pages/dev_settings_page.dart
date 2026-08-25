@@ -5,6 +5,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:barcode/barcode.dart' as bc;
 import 'package:lamsa/core/database/database_helper.dart';
 import 'package:lamsa/core/theme/app_theme.dart';
+import 'package:lamsa/core/services/error_logger.dart';
+import 'package:lamsa/core/services/pin_hash.dart';
+import 'package:lamsa/features/z_report/presentation/pages/z_report_page.dart';
 
 /// صفحة إعدادات المطور — لا تظهر في القائمة الرئيسية
 /// يُفتح عبر: Ctrl + Alt + Shift ثم اكتب  d e v m h
@@ -47,17 +50,22 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
   // رموز الحماية
   final _productsPinCtrl = TextEditingController();
   final _salesPinCtrl = TextEditingController();
+  final _debtsPinCtrl = TextEditingController();
+  String _selectedLogLevel = 'info';
   // طابعة الفواتير
   String _receiptPrinterName = '';
   String _receiptPrinterUrl = '';
   // طابعة الباركود
   String _barcodePrinterName = '';
   String _barcodePrinterUrl = '';
+  // الأقسام
+  List<String> _categories = [];
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _loadCategories();
   }
 
   @override
@@ -84,6 +92,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
     _qrUrlCtrl.dispose();
     _productsPinCtrl.dispose();
     _salesPinCtrl.dispose();
+    _debtsPinCtrl.dispose();
     super.dispose();
   }
 
@@ -91,7 +100,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
     final settings = await DatabaseHelper.instance.getAllSettings();
     if (!mounted) return;
     setState(() {
-      _storeNameCtrl.text = settings['store_name'] ?? 'لمسة';
+      _storeNameCtrl.text = settings['store_name'] ?? 'أحلى الحلوين';
       _storePhoneCtrl.text = settings['store_phone'] ?? '';
       _currencyCtrl.text = settings['currency'] ?? 'دينار';
       _lowStockCtrl.text = settings['low_stock_threshold'] ?? '5';
@@ -113,6 +122,9 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       _qrUrlCtrl.text = settings['qr_url'] ?? '';
       _productsPinCtrl.text = settings['products_pin'] ?? '';
       _salesPinCtrl.text = settings['sales_pin'] ?? '';
+      _debtsPinCtrl.text = settings['debts_pin'] ?? '';
+      _selectedLogLevel = settings['log_level'] ?? 'info';
+      ErrorLogger.instance.minLevel = LogLevel.fromString(_selectedLogLevel);
       // طابعة الفواتير — fallback للقيمة القديمة
       _receiptPrinterUrl = settings['receipt_printer_url'] ?? settings['default_printer_url'] ?? '';
       _receiptPrinterName = settings['receipt_printer_name'] ?? settings['default_printer_name'] ?? '';
@@ -121,6 +133,100 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       _barcodePrinterName = settings['barcode_printer_name'] ?? '';
       _isLoading = false;
     });
+  }
+
+  Future<void> _loadCategories() async {
+    final cats = await DatabaseHelper.instance.getAllCategories();
+    if (mounted) setState(() => _categories = cats);
+  }
+
+  Future<void> _addCategory() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('إضافة قسم جديد', style: TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+        content: TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(labelText: 'اسم القسم', border: OutlineInputBorder())),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('إضافة'),
+          ),
+        ],
+      ),
+    );
+    if (name != null && name.isNotEmpty) {
+      final id = await DatabaseHelper.instance.insertCategory(name);
+      if (id > 0) {
+        _loadCategories();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تمت إضافة القسم: $name'), backgroundColor: AppTheme.successColor));
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('هذا القسم موجود مسبقاً'), backgroundColor: AppTheme.errorColor));
+      }
+    }
+  }
+
+  Future<void> _editCategory(String oldName) async {
+    final ctrl = TextEditingController(text: oldName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تعديل القسم', style: TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+        content: TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(labelText: 'الاسم الجديد', border: OutlineInputBorder())),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+    if (newName != null && newName.isNotEmpty && newName != oldName) {
+      final rows = await DatabaseHelper.instance.updateCategory(oldName, newName);
+      if (rows > 0) {
+        _loadCategories();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تم تعديل القسم إلى: $newName'), backgroundColor: AppTheme.successColor));
+      }
+    }
+  }
+
+  Future<void> _deleteCategory(String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('حذف القسم "$name"', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold)),
+        content: const Text('هل أنت متأكد من حذف هذا القسم؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      final result = await DatabaseHelper.instance.deleteCategory(name);
+      if (result == -1) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('لا يمكن حذف القسم لوجود منتجات به'), backgroundColor: AppTheme.errorColor),
+        );
+        }
+      } else {
+        _loadCategories();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تم حذف القسم: $name'), backgroundColor: AppTheme.successColor),
+        );
+        }
+      }
+    }
   }
 
   Future<void> _saveSettings() async {
@@ -147,8 +253,10 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       DatabaseHelper.instance.setSetting('receipt_margin_bottom_mm', _receiptMarginBottomCtrl.text.trim()),
       DatabaseHelper.instance.setSetting('receipt_margin_left_mm', _receiptMarginLeftCtrl.text.trim()),
       DatabaseHelper.instance.setSetting('receipt_margin_right_mm', _receiptMarginRightCtrl.text.trim()),
-      DatabaseHelper.instance.setSetting('products_pin', _productsPinCtrl.text.trim()),
-      DatabaseHelper.instance.setSetting('sales_pin', _salesPinCtrl.text.trim()),
+      DatabaseHelper.instance.setSetting('products_pin', _productsPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_productsPinCtrl.text.trim())),
+      DatabaseHelper.instance.setSetting('sales_pin', _salesPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_salesPinCtrl.text.trim())),
+      DatabaseHelper.instance.setSetting('debts_pin', _debtsPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_debtsPinCtrl.text.trim())),
+      DatabaseHelper.instance.setSetting('log_level', _selectedLogLevel),
     ]);
 
     // توليد QR SVG وحفظه بالكاش إذا الرابط تغير
@@ -386,7 +494,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                   _buildSettingField(
                     controller: _storeNameCtrl,
                     label: 'اسم المحل',
-                    hint: 'مثال: لمسة',
+                    hint: 'مثال: أحلى الحلوين',
                     icon: Icons.store,
                     validator: (v) => (v == null || v.trim().isEmpty) ? 'لا يمكن أن يكون فارغاً' : null,
                   ),
@@ -405,6 +513,46 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                     validator: (v) => (v == null || v.trim().isEmpty) ? 'لا يمكن أن يكون فارغاً' : null,
                   ),
                   const SizedBox(height: 16),
+                  _buildSectionHeader('📂  إدارة الأقسام'),
+                  ..._categories.map((cat) => Card(
+                    color: const Color(0xFF37474F),
+                    margin: const EdgeInsets.only(bottom: 6),
+                    child: ListTile(
+                      leading: const Icon(Icons.folder, color: Colors.amber),
+                      title: Text(cat, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit, color: Colors.amber, size: 20),
+                            tooltip: 'تعديل',
+                            onPressed: () => _editCategory(cat),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: AppTheme.errorColor, size: 20),
+                            tooltip: 'حذف',
+                            onPressed: () => _deleteCategory(cat),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primaryColor,
+                        side: const BorderSide(color: AppTheme.primaryColor),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: const Icon(Icons.add),
+                      label: const Text('إضافة قسم جديد', style: TextStyle(fontWeight: FontWeight.bold)),
+                      onPressed: _addCategory,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   _buildSectionHeader('📦  إعدادات المخزون'),
                   _buildSettingField(
                     controller: _lowStockCtrl,
@@ -416,6 +564,31 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                       final n = int.tryParse(v ?? '');
                       if (n == null || n < 0) return 'أدخل رقماً صحيحاً ≥ 0';
                       return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSectionHeader('📋  إعدادات السجل'),
+                  DropdownButtonFormField<String>(
+                    value: _selectedLogLevel,
+                    decoration: const InputDecoration(
+                      labelText: 'مستوى السجل',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.article),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'debug', child: Text('DEBUG — تفصيلي جداً')),
+                      DropdownMenuItem(value: 'info', child: Text('INFO — أحداث مهمة')),
+                      DropdownMenuItem(value: 'warning', child: Text('WARNING — تحذيرات')),
+                      DropdownMenuItem(value: 'error', child: Text('ERROR — أخطاء')),
+                      DropdownMenuItem(value: 'critical', child: Text('CRITICAL — حرج')),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() {
+                          _selectedLogLevel = v;
+                          ErrorLogger.instance.minLevel = LogLevel.fromString(v);
+                        });
+                      }
                     },
                   ),
                   const SizedBox(height: 16),
@@ -694,10 +867,17 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                     icon: Icons.lock,
                     keyboardType: TextInputType.number,
                   ),
+                  _buildSettingField(
+                    controller: _debtsPinCtrl,
+                    label: 'رمز صفحة الديون',
+                    hint: 'اتركه فارغاً لإلغاء القفل',
+                    icon: Icons.lock,
+                    keyboardType: TextInputType.number,
+                  ),
                   const Padding(
                     padding: EdgeInsets.only(bottom: 12),
                     child: Text(
-                      'ℹ️ إذا حددت رمزاً، سيُطلب عند الدخول لصفحة المنتجات أو المبيعات.',
+                      'ℹ️ إذا حددت رمزاً، سيُطلب عند الدخول لصفحة المنتجات أو المبيعات أو الديون.',
                       style: TextStyle(color: Colors.white38, fontSize: 11),
                     ),
                   ),
@@ -740,6 +920,27 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                       'ℹ️ النسخ الاحتياطي يُحفظ في مجلد مخفي على D:\\\n'
                       'الاستيراد يستبدل قاعدة البيانات الحالية بالكامل.',
                       style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.5),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSectionHeader('📊  التقارير'),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: const Icon(Icons.summarize),
+                      label: const Text('تقرير نهاية اليوم (Z-Report)', style: TextStyle(fontWeight: FontWeight.bold)),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const ZReportPage()),
+                        );
+                      },
                     ),
                   ),
                   const SizedBox(height: 32),

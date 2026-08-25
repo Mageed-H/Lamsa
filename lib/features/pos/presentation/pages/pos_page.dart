@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -9,6 +10,7 @@ import 'package:printing/printing.dart';
 import 'package:lamsa/core/database/database_helper.dart';
 import 'package:lamsa/core/theme/app_theme.dart';
 import 'package:lamsa/features/products/data/models/product_model.dart';
+import 'package:lamsa/core/services/error_logger.dart';
 
 class PosPage extends StatefulWidget {
   const PosPage({Key? key}) : super(key: key);
@@ -39,11 +41,13 @@ class _PosPageState extends State<PosPage> {
   int _lastPrintTotal = 0;
   int _lastPrintGiven = 0;
   int _lastPrintChange = 0;
+  // تصفية المنتجات
+  String? _posSelectedCategory;
 
   @override
   void initState() {
     super.initState();
-    DatabaseHelper.revision.addListener(_loadAllProducts);
+    DatabaseHelper.productsRevision.addListener(_loadAllProducts);
     // مستمع يرجع التركيز تلقائياً لحقل الباركود كل ما يضيع
     _barcodeFocusNode.addListener(_autoRefocus);
     // أول ما تفتح الشاشة، نخلي التركيز تلقائياً على حقل الباركود
@@ -56,7 +60,7 @@ class _PosPageState extends State<PosPage> {
 
   @override
   void dispose() {
-    DatabaseHelper.revision.removeListener(_loadAllProducts);
+    DatabaseHelper.productsRevision.removeListener(_loadAllProducts);
     _barcodeFocusNode.removeListener(_autoRefocus);
     _barcodeController.dispose();
     _barcodeFocusNode.dispose();
@@ -70,6 +74,7 @@ class _PosPageState extends State<PosPage> {
 
   // الدالة السحرية اللي تشتغل من نضرب الباركود بالجهاز
   Future<void> _onBarcodeScanned(String barcode) async {
+    try {
     final cleanBarcode = _cleanBarcode(barcode);
     if (cleanBarcode.isEmpty) {
       _keepFocus();
@@ -159,11 +164,56 @@ class _PosPageState extends State<PosPage> {
     // نفرغ الحقل ونرجع التركيز عليه استعداداً للقطعة اللي بعدها
     _barcodeController.clear();
     _keepFocus();
+    } catch (e, st) {
+      await ErrorLogger.instance.logError(e, st, context: 'مسح باركود');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ في المسح: $e'), backgroundColor: AppTheme.errorColor),
+        );
+      }
+      _barcodeController.clear();
+      _keepFocus();
+    }
   }
 
   // دالة مساعدة للحفاظ على التركيز
   void _keepFocus() {
     FocusScope.of(context).requestFocus(_barcodeFocusNode);
+  }
+
+  // إضافة منتج مباشرة من الكروت (بدون باركود)
+  void _addProductToCart(ProductModel product) {
+    final int currentInCart = _cart
+        .where((i) => (i['product'] as ProductModel).id == product.id)
+        .fold<int>(0, (s, i) => s + (i['quantity'] as int));
+    if (currentInCart >= product.stock) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('لا يمكن إضافة المزيد! المخزون من "${product.name}" = ${product.stock} قطعة'),
+            backgroundColor: AppTheme.errorColor,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+    setState(() {
+      int index = _cart.indexWhere((item) => (item['product'] as ProductModel).id == product.id);
+      if (index >= 0) {
+        _cart[index]['quantity'] = (_cart[index]['quantity'] as int) + 1;
+      } else {
+        _cart.add({'product': product, 'quantity': 1});
+      }
+    });
+  }
+
+  List<ProductModel> get _filteredPosProducts {
+    var list = _allProducts;
+    if (_posSelectedCategory != null && _posSelectedCategory!.isNotEmpty) {
+      list = list.where((p) => p.category == _posSelectedCategory).toList();
+    }
+    return list;
   }
 
   // يرجع التركيز تلقائياً لحقل الباركود بعد كل فريم إذا ضاع
@@ -284,6 +334,146 @@ class _PosPageState extends State<PosPage> {
       _cart[index]['quantity'] = qty + 1;
     });
     _keepFocus();
+  }
+
+  // تعديل سعر منتج في السلة
+  void _editItemPrice(int index) {
+    final item = _cart[index];
+    final product = item['product'] as ProductModel;
+    final currentPrice = (item['custom_price'] as int?) ?? product.price;
+    final priceCtrl = TextEditingController(text: '$currentPrice');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('تعديل سعر — ${product.name}', style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('السعر الأصلي: ${product.price} دينار', style: const TextStyle(color: AppTheme.textSecondary)),
+            Text('سعر الشراء: ${product.purchasePrice} دينار (الحد الأدنى)', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: priceCtrl,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              decoration: const InputDecoration(
+                labelText: 'السعر الجديد',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.attach_money),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() => _cart[index].remove('custom_price'));
+              Navigator.pop(ctx);
+            },
+            child: const Text('إعادة الأصلي', style: TextStyle(color: AppTheme.errorColor)),
+          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+            onPressed: () {
+              final newPrice = int.tryParse(priceCtrl.text.trim());
+              if (newPrice == null || newPrice <= 0) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('أدخل سعراً صحيحاً'), backgroundColor: AppTheme.errorColor),
+                );
+                return;
+              }
+              if (newPrice < product.purchasePrice) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(
+                    content: Text('السعر لا يمكن أن يقل عن سعر الشراء (${product.purchasePrice} دينار)'),
+                    backgroundColor: AppTheme.errorColor,
+                  ),
+                );
+                return;
+              }
+              setState(() => _cart[index]['custom_price'] = newPrice);
+              Navigator.pop(ctx);
+            },
+            child: const Text('تطبيق'),
+          ),
+        ],
+      ),
+    ).then((_) => _keepFocus());
+  }
+
+  void _editItemDiscount(int index) {
+    final item = _cart[index];
+    final product = item['product'] as ProductModel;
+    final currentPrice = (item['custom_price'] as int?) ?? product.price;
+    final currentDiscount = (item['item_discount'] as int?) ?? 0;
+    final discountCtrl = TextEditingController(text: currentDiscount > 0 ? '$currentDiscount' : '');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('خصم على — ${product.name}', style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('السعر: $currentPrice دينار', style: const TextStyle(color: AppTheme.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: discountCtrl,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              decoration: const InputDecoration(
+                labelText: 'مبلغ الخصم (دينار)',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.discount),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() => _cart[index].remove('item_discount'));
+              Navigator.pop(ctx);
+            },
+            child: const Text('إزالة الخصم', style: TextStyle(color: AppTheme.errorColor)),
+          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+            onPressed: () {
+              final discount = int.tryParse(discountCtrl.text.trim()) ?? 0;
+              if (discount < 0) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('الخصم لا يمكن أن يكون سالباً'), backgroundColor: AppTheme.errorColor),
+                );
+                return;
+              }
+              if (discount >= currentPrice) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('الخصم لا يمكن أن يساوي أو يتجاوز السعر'), backgroundColor: AppTheme.errorColor),
+                );
+                return;
+              }
+              setState(() {
+                if (discount > 0) {
+                  _cart[index]['item_discount'] = discount;
+                } else {
+                  _cart[index].remove('item_discount');
+                }
+              });
+              Navigator.pop(ctx);
+            },
+            child: const Text('تطبيق'),
+          ),
+        ],
+      ),
+    ).then((_) => _keepFocus());
   }
 
   // حوار الدفع: حساب الفكة + اختيار الطباعة
@@ -497,74 +687,64 @@ class _PosPageState extends State<PosPage> {
     final int changeAmount = (given - total).clamp(0, 9999999);
     amountController.dispose();
 
-    final cartSnapshot = List<Map<String, dynamic>>.from(_cart);
-    final saleId = await DatabaseHelper.instance.completeSale(
-      _cart,
-      discountValue: discountVal,
-    );
-
-    if (saleId > 0 && mounted) {
-      // حفظ بيانات آخر فاتورة لإعادة الطباعة
-      _lastPrintCart = cartSnapshot;
-      _lastPrintSubtotal = subtotal;
-      _lastPrintDiscount = discountVal;
-      _lastPrintTotal = total;
-      _lastPrintGiven = given;
-      _lastPrintChange = changeAmount;
-      setState(() {
-        _cart.clear();
-        _discountAmount = 0;
-        _isDiscountPercent = false;
-      });
-
-      if (shouldPrint) {
-        await _printInvoice(
-          cartSnapshot,
-          subtotal,
-          discountVal,
-          total,
-          given,
-          changeAmount,
-        );
-      }
-
-      if (mounted) {
-        final remainingStock = cartSnapshot
-            .map((i) {
-              final p = i['product'] as ProductModel;
-              final qty = i['quantity'] as int;
-              return '${p.name} (${p.stock - qty})';
-            })
-            .join('  |  ');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'تم البيع بنجاح ✓'
-                  '${changeAmount > 0 ? '  |  الباقي: $changeAmount د' : ''}',
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'المتبقي: $remainingStock',
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ],
-            ),
-            backgroundColor: AppTheme.successColor,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('حدث خطأ أثناء إتمام البيع!'),
-          backgroundColor: AppTheme.errorColor,
-        ),
+    try {
+      final cartSnapshot = List<Map<String, dynamic>>.from(_cart);
+      final saleId = await DatabaseHelper.instance.completeSale(
+        _cart,
+        discountValue: discountVal,
       );
+
+      if (saleId > 0 && mounted) {
+        _lastPrintCart = cartSnapshot;
+        _lastPrintSubtotal = subtotal;
+        _lastPrintDiscount = discountVal;
+        _lastPrintTotal = total;
+        _lastPrintGiven = given;
+        _lastPrintChange = changeAmount;
+        setState(() {
+          _cart.clear();
+          _discountAmount = 0;
+          _isDiscountPercent = false;
+        });
+
+        if (shouldPrint) {
+          await _printInvoice(cartSnapshot, subtotal, discountVal, total, given, changeAmount);
+        }
+
+        if (mounted) {
+          final remainingStock = cartSnapshot.map((i) {
+            final p = i['product'] as ProductModel;
+            final qty = i['quantity'] as int;
+            return '${p.name} (${p.stock - qty})';
+          }).join('  |  ');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('تم البيع بنجاح ✓${changeAmount > 0 ? '  |  الباقي: $changeAmount د' : ''}'),
+                  const SizedBox(height: 4),
+                  Text('المتبقي: $remainingStock', style: const TextStyle(fontSize: 12)),
+                ],
+              ),
+              backgroundColor: AppTheme.successColor,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('حدث خطأ أثناء إتمام البيع!'), backgroundColor: AppTheme.errorColor),
+        );
+      }
+    } catch (e, st) {
+      await ErrorLogger.instance.logError(e, st, context: 'إتمام البيع - _showPaymentDialog');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ حادث: $e'), backgroundColor: AppTheme.errorColor, duration: const Duration(seconds: 5)),
+        );
+      }
     }
     _keepFocus();
   }
@@ -579,7 +759,7 @@ class _PosPageState extends State<PosPage> {
     int change,
   ) async {
     final settings = await DatabaseHelper.instance.getAllSettings();
-    final storeName = settings['store_name'] ?? 'لمسة';
+    final storeName = settings['store_name'] ?? 'أحلى الحلوين';
     final storePhone = settings['store_phone'] ?? '';
     final currency = settings['currency'] ?? 'دينار';
     final footer = settings['receipt_footer'] ?? 'شكراً لزيارتكم';
@@ -702,7 +882,10 @@ class _PosPageState extends State<PosPage> {
       final item = reversed[i];
       final product = item['product'] as ProductModel;
       final qty = item['quantity'] as int;
-      final rowTotal = product.price * qty;
+      final itemPrice = (item['custom_price'] as int?) ?? product.price;
+      final itemDiscount = (item['item_discount'] as int?) ?? 0;
+      final effectivePrice = itemPrice - itemDiscount;
+      final rowTotal = effectivePrice * qty;
       itemWidgets.add(
         pw.Padding(
           padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
@@ -731,7 +914,7 @@ class _PosPageState extends State<PosPage> {
               pw.Expanded(
                 flex: 3,
                 child: pw.Text(
-                  '${product.price}',
+                  '$itemPrice',
                   style: body(),
                   textAlign: pw.TextAlign.center,
                 ),
@@ -931,12 +1114,14 @@ class _PosPageState extends State<PosPage> {
       try {
         final ok = await Printing.directPrintPdf(
           printer: Printer(url: savedPrinterUrl, name: savedPrinterName),
-          onLayout: (_) => doc.save(),
+          onLayout: (_) async => await Isolate.run(() => doc.save()),
         );
         if (ok) return;
       } catch (_) {}
     }
-    await Printing.layoutPdf(onLayout: (_) => doc.save());
+    await Printing.layoutPdf(onLayout: (_) async {
+      return await Isolate.run(() => doc.save());
+    });
   }
 
   // عرض المنتجات ذات المخزون المنخفض
@@ -1368,7 +1553,9 @@ class _PosPageState extends State<PosPage> {
   // ─── حساب الإجماليات ───
   int get _subtotal => _cart.fold(0, (s, i) {
     final p = i['product'] as ProductModel;
-    return s + (p.price * (i['quantity'] as int));
+    final itemPrice = (i['custom_price'] as int?) ?? p.price;
+    final itemDiscount = (i['item_discount'] as int?) ?? 0;
+    return s + ((itemPrice - itemDiscount) * (i['quantity'] as int));
   });
 
   int get _discountValue {
@@ -1381,6 +1568,12 @@ class _PosPageState extends State<PosPage> {
 
   @override
   Widget build(BuildContext context) {
+    final categories = <String>['الكل'];
+    for (final p in _allProducts) {
+      if (!categories.contains(p.category)) categories.add(p.category);
+    }
+    final filteredProducts = _filteredPosProducts;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -1388,36 +1581,25 @@ class _PosPageState extends State<PosPage> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
-          // زر إعادة طباعة آخر فاتورة
           if (_lastPrintCart != null)
             IconButton(
               icon: const Icon(Icons.receipt_long),
               onPressed: () => _printInvoice(
-                _lastPrintCart!,
-                _lastPrintSubtotal,
-                _lastPrintDiscount,
-                _lastPrintTotal,
-                _lastPrintGiven,
-                _lastPrintChange,
+                _lastPrintCart!, _lastPrintSubtotal, _lastPrintDiscount,
+                _lastPrintTotal, _lastPrintGiven, _lastPrintChange,
               ),
               tooltip: 'طباعة آخر فاتورة',
             ),
-          // زر الفواتير المعلقة مع نقطة حمراء دليل
           IconButton(
             icon: Stack(
               children: [
                 const Icon(Icons.pause_circle_outline),
                 if (_hasSuspendedOrders)
                   Positioned(
-                    right: 0,
-                    top: 0,
+                    right: 0, top: 0,
                     child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.errorColor,
-                        shape: BoxShape.circle,
-                      ),
+                      width: 10, height: 10,
+                      decoration: const BoxDecoration(color: AppTheme.errorColor, shape: BoxShape.circle),
                     ),
                   ),
               ],
@@ -1425,22 +1607,17 @@ class _PosPageState extends State<PosPage> {
             onPressed: _showSuspendedOrders,
             tooltip: 'الفواتير المعلقة',
           ),
-          // زر المخزون المنخفض مع عدد المنتجات
           IconButton(
             icon: Stack(
               children: [
                 const Icon(Icons.inventory_2_outlined),
                 if (_lowStockProducts.isNotEmpty)
                   Positioned(
-                    right: 0,
-                    top: 0,
+                    right: 0, top: 0,
                     child: Container(
                       padding: const EdgeInsets.all(2),
                       constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                      decoration: const BoxDecoration(
-                        color: AppTheme.warningColor,
-                        shape: BoxShape.circle,
-                      ),
+                      decoration: const BoxDecoration(color: AppTheme.warningColor, shape: BoxShape.circle),
                       child: Text(
                         '${_lowStockProducts.length}',
                         style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white),
@@ -1453,13 +1630,11 @@ class _PosPageState extends State<PosPage> {
             onPressed: _showLowStockDialog,
             tooltip: 'المخزون المنخفض',
           ),
-          // زر البحث عن منتج
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: _showProductSearchDialog,
             tooltip: 'بحث عن منتج',
           ),
-          // زر الكاميرا يظهر على الموبايل فقط
           if (!kIsWeb && (Platform.isAndroid || Platform.isIOS))
             IconButton(
               icon: const Icon(Icons.camera_alt),
@@ -1468,284 +1643,360 @@ class _PosPageState extends State<PosPage> {
             ),
         ],
       ),
-      // نستخدم GestureDetector حتى إذا الكاشير لمس الشاشة بالغلط، يرجع التركيز للباركود
-      body: GestureDetector(
-        onTap: _keepFocus,
-        child: Column(
+      body: Row(
           children: [
-            // 1. حقل قراءة الباركود (المستمع الدائم)
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: TextField(
-                controller: _barcodeController,
-                focusNode: _barcodeFocusNode,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: 'قم بمسح الباركود هنا...',
-                  prefixIcon: const Icon(
-                    Icons.qr_code_scanner,
-                    color: AppTheme.primaryColor,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  filled: true,
-                  fillColor: AppTheme.surfaceColor,
-                ),
-                onSubmitted:
-                    _onBarcodeScanned, // يتنفذ تلقائياً من يخلص جهاز السكانر قراءة
-              ),
-            ),
-
-            // 2. قائمة المنتجات في الفاتورة الحالية (سيتم نقلها لملف invoice_list_widget لاحقاً)
+            // ── الجزء الأيسر: السلة + الدفع ──
             Expanded(
-              child: _cart.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'الفاتورة فارغة، قم بمسح منتج للبدء',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 18,
+              flex: 1,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _keepFocus,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      left: BorderSide(color: AppTheme.primaryColor.withOpacity(0.2), width: 1),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                    // حقل الباركود
+                    Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: TextField(
+                        controller: _barcodeController,
+                        focusNode: _barcodeFocusNode,
+                        autofocus: true,
+                        decoration: InputDecoration(
+                          labelText: 'امسح الباركود...',
+                          prefixIcon: const Icon(Icons.qr_code_scanner, color: AppTheme.primaryColor, size: 20),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          filled: true,
+                          fillColor: AppTheme.surfaceColor,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         ),
+                        style: const TextStyle(fontSize: 13),
+                        onSubmitted: _onBarcodeScanned,
                       ),
-                    )
-                  : ListView.builder(
-                      itemCount: _cart.length,
-                      itemBuilder: (context, index) {
-                        final item = _cart[index];
-                        final product = item['product'] as ProductModel;
-                        final qty = item['quantity'] as int;
-
-                        return Card(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 4,
+                    ),
+                    // عنوان السلة
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      color: AppTheme.primaryColor.withOpacity(0.08),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.shopping_cart, size: 18, color: AppTheme.primaryColor),
+                          const SizedBox(width: 6),
+                          Text(
+                            'الفاتورة (${_cart.length} صنف)',
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
                           ),
-                          child: ListTile(
-                            title: Text(
-                              product.name,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                          const Spacer(),
+                          if (_cart.isNotEmpty)
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _cart.clear();
+                                  _discountAmount = 0;
+                                  _isDiscountPercent = false;
+                                });
+                              },
+                              child: const Text('مسح الكل', style: TextStyle(color: AppTheme.errorColor, fontSize: 12)),
+                            ),
+                        ],
+                      ),
+                    ),
+                    // قائمة المنتجات بالسلة
+                    Expanded(
+                      child: _cart.isEmpty
+                          ? const Center(
+                              child: Text(
+                                'الفاتورة فارغة',
+                                style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
                               ),
-                            ),
-                            subtitle: Text(
-                              '${product.price} دينار | ${product.price * qty} إجمالي',
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // زر تقليل الكمية
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.remove_circle,
-                                    color: AppTheme.warningColor,
-                                    size: 26,
-                                  ),
-                                  onPressed: () => _decreaseQty(index),
-                                  tooltip: 'تقليل',
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                ),
-                                // عرض الكمية
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                  ),
-                                  child: Text(
-                                    '$qty',
-                                    style: const TextStyle(
-                                      fontSize: 20,
-                                      color: AppTheme.primaryColor,
-                                      fontWeight: FontWeight.bold,
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              itemCount: _cart.length,
+                              itemBuilder: (context, index) {
+                                final item = _cart[index];
+                                final product = item['product'] as ProductModel;
+                                final qty = item['quantity'] as int;
+                                final itemPrice = (item['custom_price'] as int?) ?? product.price;
+                                final itemDiscount = (item['item_discount'] as int?) ?? 0;
+                                final effectivePrice = itemPrice - itemDiscount;
+                                return Card(
+                                  margin: const EdgeInsets.only(bottom: 4),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                product.name,
+                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            GestureDetector(
+                                              onTap: () => _editItemPrice(index),
+                                              child: Text(
+                                                '$itemPrice د.ع',
+                                                style: TextStyle(
+                                                  color: (item['custom_price'] != null) ? AppTheme.warningColor : AppTheme.primaryColor,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 12,
+                                                  decoration: itemDiscount > 0 ? TextDecoration.lineThrough : null,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Row(
+                                          children: [
+                                            _qtyBtn(Icons.remove_circle, AppTheme.warningColor, () => _decreaseQty(index)),
+                                            Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                                              child: Text('$qty', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+                                            ),
+                                            _qtyBtn(Icons.add_circle, AppTheme.successColor, () => _increaseQty(index)),
+                                            const Spacer(),
+                                            if (itemDiscount > 0)
+                                              GestureDetector(
+                                                onTap: () => _editItemDiscount(index),
+                                                child: Text(
+                                                  '$effectivePrice د.ع',
+                                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.successColor),
+                                                ),
+                                              ),
+                                            if (itemDiscount > 0) const SizedBox(width: 4),
+                                            GestureDetector(
+                                              onTap: () => _editItemDiscount(index),
+                                              child: Icon(Icons.discount, size: 16, color: itemDiscount > 0 ? AppTheme.errorColor : AppTheme.textSecondary),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                ),
-                                // زر زيادة الكمية
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.add_circle,
-                                    color: AppTheme.successColor,
-                                    size: 26,
-                                  ),
-                                  onPressed: () => _increaseQty(index),
-                                  tooltip: 'زيادة',
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                ),
-                                const SizedBox(width: 6),
-                                // زر حذف
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                    color: AppTheme.errorColor,
-                                  ),
-                                  onPressed: () {
-                                    setState(() => _cart.removeAt(index));
-                                    _keepFocus();
-                                  },
-                                  tooltip: 'حذف',
+                                );
+                              },
+                            ),
+                    ),
+                    // لوحة الدفع السفلية
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, -3)),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_discountValue > 0) ...[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('$_discountValue د.ع خصم', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                                Text('الصافي: $_finalTotal د.ع', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.primaryColor)),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                          ],
+                          if (_discountValue == 0)
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('الإجمالي:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                                Text(
+                                  '$_finalTotal د.ع',
+                                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
                                 ),
                               ],
                             ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              _posActionBtn(Icons.discount_outlined, _discountValue > 0 ? AppTheme.errorColor : AppTheme.textSecondary, _showDiscountDialog),
+                              const SizedBox(width: 4),
+                              _posActionBtn(Icons.pause_circle_filled, AppTheme.warningColor, _suspendOrder),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.successColor,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                  ),
+                                  icon: const Icon(Icons.point_of_sale, size: 18),
+                                  label: const Text('دفع', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                                  onPressed: _cart.isEmpty ? null : _showPaymentDialog,
+                                ),
+                              ),
+                            ],
                           ),
-                        );
-                      },
+                        ],
+                      ),
                     ),
-            ),
-
-            // 3. لوحة التحكم السفلية (سيتم نقلها لملف pos_control_panel لاحقاً)
-            Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, -5),
-                  ),
-                ],
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
+                  ],
                 ),
               ),
+            ),
+            ),
+            // ── الجزء الأيمن: المنتجات على شكل كروت ──
+            Expanded(
+              flex: 2,
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // صف الخصم (يظهر فقط عند وجود خصم)
-                  if (_discountValue > 0) ...[
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '$_subtotal دينار',
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            decoration: TextDecoration.lineThrough,
-                            fontSize: 14,
-                          ),
-                        ),
-                        Text(
-                          'خصم: -$_discountValue دينار',
-                          style: const TextStyle(
-                            color: AppTheme.errorColor,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                  ],
-                  // صف الإجمالي
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        _discountValue > 0 ? 'الصافي:' : 'الإجمالي:',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(
-                        '$_finalTotal دينار',
-                        style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primaryColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  // صف الأزرار
-                  Row(
-                    children: [
-                      // زر الخصم
-                      IconButton(
-                        icon: Icon(
-                          Icons.discount_outlined,
-                          color: _discountValue > 0
-                              ? AppTheme.errorColor
-                              : AppTheme.textSecondary,
-                          size: 28,
-                        ),
-                        onPressed: _cart.isEmpty ? null : _showDiscountDialog,
-                        tooltip: 'خصم',
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.errorColor,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          icon: const Icon(Icons.cancel),
-                          label: const Text(
-                            'إلغاء',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
+                  // فلتر الأقسام فقط
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    color: AppTheme.surfaceColor,
+                    child: SizedBox(
+                      height: 36,
+                      child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: categories.length,
+                            separatorBuilder: (_, _) => const SizedBox(width: 6),
+                            itemBuilder: (ctx, i) {
+                              final cat = categories[i];
+                              final selected = (i == 0 && _posSelectedCategory == null) || _posSelectedCategory == cat;
+                              return ChoiceChip(
+                                label: Text(cat, style: TextStyle(fontSize: 12, color: selected ? Colors.white : AppTheme.textPrimary)),
+                                selected: selected,
+                                selectedColor: AppTheme.primaryColor,
+                                backgroundColor: Colors.white,
+                                onSelected: (_) {
+                                  setState(() {
+                                    _posSelectedCategory = (i == 0) ? null : cat;
+                                  });
+                                },
+                              );
+},
                             ),
                           ),
-                          onPressed: () {
-                            setState(() {
-                              _cart.clear();
-                              _discountAmount = 0;
-                              _isDiscountPercent = false;
-                            });
-                            _keepFocus();
-                          },
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.warningColor,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
+                      // شبكة المنتجات
+                    Expanded(
+                    child: filteredProducts.isEmpty
+                        ? const Center(child: Text('لا توجد منتجات', style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)))
+                        : LayoutBuilder(
+                            builder: (context, constraints) {
+                              final crossCount = constraints.maxWidth > 900 ? 4 : (constraints.maxWidth > 600 ? 3 : 2);
+                              return GridView.builder(
+                                padding: const EdgeInsets.all(10),
+                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: crossCount,
+                                  mainAxisSpacing: 8,
+                                  crossAxisSpacing: 8,
+                                  childAspectRatio: 0.85,
+                                ),
+                                itemCount: filteredProducts.length,
+                                itemBuilder: (context, index) {
+                                  final p = filteredProducts[index];
+                                  final inCart = _cart
+                                      .where((i) => (i['product'] as ProductModel).id == p.id)
+                                      .fold<int>(0, (s, i) => s + (i['quantity'] as int));
+                                  return GestureDetector(
+                                    onTap: () => _addProductToCart(p),
+                                    child: Card(
+                                      elevation: 2,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Container(
+                                            width: 56, height: 56,
+                                            decoration: BoxDecoration(
+                                              color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Center(
+                                              child: Text(
+                                                p.name.isNotEmpty ? p.name[0] : '?',
+                                                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                                            child: Text(
+                                              p.name,
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                              textAlign: TextAlign.center,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${p.price} د.ع',
+                                            style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold, fontSize: 13),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'متوفر: ${p.stock}',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: p.stock <= 0 ? AppTheme.errorColor : AppTheme.textSecondary,
+                                            ),
+                                          ),
+                                          if (inCart > 0)
+                                            Container(
+                                              margin: const EdgeInsets.only(top: 4),
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.primaryColor,
+                                                borderRadius: BorderRadius.circular(12),
+                                              ),
+                                              child: Text(
+                                                'بالسلة: $inCart',
+                                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
                           ),
-                          icon: const Icon(Icons.pause_circle_filled),
-                          label: const Text(
-                            'تعليق',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          onPressed: _suspendOrder,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.successColor,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          icon: const Icon(Icons.point_of_sale),
-                          label: const Text(
-                            'دفع',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          onPressed: _cart.isEmpty ? null : _showPaymentDialog,
-                        ),
-                      ),
-                    ],
                   ),
                 ],
               ),
             ),
           ],
         ),
+);
+    }
+
+Widget _qtyBtn(IconData icon, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Icon(icon, color: color, size: 24),
+    );
+  }
+
+  Widget _posActionBtn(IconData icon, Color c, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: c.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(icon, color: c, size: 22),
       ),
     );
   }

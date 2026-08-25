@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../database/database_helper.dart';
+// import '../services/error_logger.dart';
+import '../services/pin_hash.dart';
+import '../widgets/error_boundary.dart';
 import '../../features/pos/presentation/pages/pos_page.dart';
 import '../../features/products/presentation/pages/products_page.dart';
 import '../../features/sales/presentation/pages/sales_page.dart';
+import '../../features/debts/presentation/pages/debts_page.dart';
 import '../../features/settings/presentation/pages/dev_settings_page.dart';
 import '../theme/app_theme.dart';
 
@@ -20,6 +24,7 @@ class _MainLayoutState extends State<MainLayout> {
   // الصفحات المقفلة/المفتوحة: true = مفتوح بعد إدخال PIN هذه الجلسة
   bool _productsUnlocked = false;
   bool _salesUnlocked = false;
+  bool _debtsUnlocked = false;
 
   // تسلسل الأحرف السري لفتح صفحة المطور: Ctrl+Alt+Shift + d e v m h
   static const _devSequence = [
@@ -36,6 +41,7 @@ class _MainLayoutState extends State<MainLayout> {
     const PosPage(), // شاشة الكاشير (Index 0)
     const ProductsPage(), // شاشة إدارة المنتجات (Index 1)
     const SalesPage(), // شاشة المبيعات (Index 2)
+    const DebtsPage(), // شاشة الديون (Index 3)
   ];
 
   @override
@@ -64,7 +70,7 @@ class _MainLayoutState extends State<MainLayout> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) {
           void tryPin() {
-            if (pinCtrl.text == savedPin) {
+            if (PinHash.verify(pinCtrl.text, savedPin)) {
               Navigator.pop(ctx, true);
             } else {
               setDialogState(() {
@@ -141,6 +147,13 @@ class _MainLayoutState extends State<MainLayout> {
       _salesUnlocked = true;
     }
 
+    // فحص PIN للديون
+    if (index == 3 && !_debtsUnlocked) {
+      final ok = await _askForPin('debts_pin', 'الديون');
+      if (!ok) return;
+      _debtsUnlocked = true;
+    }
+
     setState(() => _currentIndex = index);
   }
 
@@ -182,9 +195,17 @@ class _MainLayoutState extends State<MainLayout> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
+      body: Stack(
+        children: _pages.asMap().entries.map((entry) {
+          final contexts = ['الكاشير', 'المنتجات', 'المبيعات', 'الديون'];
+          return Offstage(
+            offstage: entry.key != _currentIndex,
+            child: ErrorBoundary(
+              pageName: contexts[entry.key],
+              child: entry.value,
+            ),
+          );
+        }).toList(),
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
@@ -201,11 +222,15 @@ class _MainLayoutState extends State<MainLayout> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.inventory_2),
-            label: 'المخزن والمنتجات',
+            label: 'المخزن',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.analytics),
             label: 'المبيعات',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.account_balance_wallet),
+            label: 'الديون',
           ),
         ],
       ),

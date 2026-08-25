@@ -19,6 +19,9 @@ class _SalesPageState extends State<SalesPage> {
   Map<String, int> _summary = {};
   List<Map<String, dynamic>> _sales = [];
   Map<String, int> _filterSummary = {};
+  int _inventoryValue = 0;
+  Map<String, int> _expensesSummary = {};
+  List<Map<String, dynamic>> _expenses = [];
   bool _isLoading = true;
   SalesFilter _activeFilter = SalesFilter.today;
   DateTime? _selectedMonth;
@@ -27,13 +30,13 @@ class _SalesPageState extends State<SalesPage> {
   @override
   void initState() {
     super.initState();
-    DatabaseHelper.revision.addListener(_loadData);
+    DatabaseHelper.salesRevision.addListener(_loadData);
     _loadData();
   }
 
   @override
   void dispose() {
-    DatabaseHelper.revision.removeListener(_loadData);
+    DatabaseHelper.salesRevision.removeListener(_loadData);
     super.dispose();
   }
 
@@ -76,11 +79,17 @@ class _SalesPageState extends State<SalesPage> {
     final range = _getDateRange(_activeFilter);
     final sales = await DatabaseHelper.instance.getSalesByDateRange(range.$1, range.$2);
     final filterSummary = await DatabaseHelper.instance.getSalesSummaryByDateRange(range.$1, range.$2);
+    final inventoryValue = await DatabaseHelper.instance.getTotalInventoryValue();
+    final expensesSummary = await DatabaseHelper.instance.getExpensesSummary();
+    final expenses = await DatabaseHelper.instance.getExpensesByDateRange(range.$1, range.$2);
     if (mounted) {
       setState(() {
         _summary = summary;
         _sales = sales;
         _filterSummary = filterSummary;
+        _inventoryValue = inventoryValue;
+        _expensesSummary = expensesSummary;
+        _expenses = expenses;
         _isLoading = false;
       });
     }
@@ -176,7 +185,7 @@ class _SalesPageState extends State<SalesPage> {
   // ─── تصدير تقرير المبيعات كـ PDF ───
   Future<void> _exportSalesReport() async {
     final settings = await DatabaseHelper.instance.getAllSettings();
-    final storeName = settings['store_name'] ?? 'لمسة';
+    final storeName = settings['store_name'] ?? 'أحلى الحلوين';
     final currency = settings['currency'] ?? 'دينار';
 
     final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
@@ -253,7 +262,7 @@ class _SalesPageState extends State<SalesPage> {
             mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
             children: [
               statBox('الإيرادات', '$reportRevenue $currency'),
-              statBox('رأس المال', '$reportCapital $currency'),
+              statBox('تكلفة البضاعة', '$reportCapital $currency'),
               statBox('الأرباح', '$reportProfit $currency'),
               statBox('الفواتير', '$reportCount'),
             ],
@@ -277,7 +286,7 @@ class _SalesPageState extends State<SalesPage> {
                   pdfCell('القطع', bold: true),
                   pdfCell('الخصم', bold: true),
                   pdfCell('الربح', bold: true),
-                  pdfCell('رأس المال', bold: true),
+                  pdfCell('التكلفة', bold: true),
                   pdfCell('المبلغ', bold: true),
                   pdfCell('#', bold: true),
                   pdfCell('التاريخ', bold: true),
@@ -360,6 +369,9 @@ class _SalesPageState extends State<SalesPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  // رأس المال (قيمة المخزون الإجمالية)
+                  _buildInventoryCard(),
+                  const SizedBox(height: 12),
                   // ملخص اليوم
                   _buildSummaryCard(
                     title: 'مبيعات اليوم',
@@ -367,6 +379,7 @@ class _SalesPageState extends State<SalesPage> {
                     revenue: _summary['today_revenue'] ?? 0,
                     profit: _summary['today_profit'] ?? 0,
                     count: _summary['today_count'] ?? 0,
+                    expenses: _expensesSummary['today'] ?? 0,
                     color: AppTheme.primaryColor,
                   ),
                   const SizedBox(height: 12),
@@ -377,6 +390,7 @@ class _SalesPageState extends State<SalesPage> {
                     revenue: _summary['all_revenue'] ?? 0,
                     profit: _summary['all_profit'] ?? 0,
                     count: _summary['all_count'] ?? 0,
+                    expenses: _expensesSummary['all'] ?? 0,
                     color: AppTheme.successColor,
                   ),
                   const SizedBox(height: 20),
@@ -525,7 +539,9 @@ class _SalesPageState extends State<SalesPage> {
   Widget _buildPeriodSummary() {
     final rev = _filterSummary['revenue'] ?? 0;
     final pro = _filterSummary['profit'] ?? 0;
-    final capital = rev - pro;
+    final cost = rev - pro;
+    final exp = _expenses.fold<int>(0, (s, e) => s + (e['amount'] as int? ?? 0));
+    final netCash = rev - cost - exp;
     return Card(
       elevation: 1,
       margin: const EdgeInsets.only(bottom: 8),
@@ -537,9 +553,10 @@ class _SalesPageState extends State<SalesPage> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _buildStatColumn('الإيرادات', '$rev د', AppTheme.primaryColor),
-            _buildStatColumn('رأس المال', '$capital د', AppTheme.warningColor),
+            _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
+            _buildStatColumn('المصروفات', '$exp د', AppTheme.errorColor),
             _buildStatColumn('الأرباح', '$pro د', AppTheme.successColor),
-            _buildStatColumn('الفواتير', '${_filterSummary['count'] ?? 0}', AppTheme.textPrimary),
+            _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
           ],
         ),
       ),
@@ -552,9 +569,11 @@ class _SalesPageState extends State<SalesPage> {
     required int revenue,
     required int profit,
     required int count,
+    required int expenses,
     required Color color,
   }) {
-    final capital = revenue - profit;
+    final cost = revenue - profit;
+    final netCash = revenue - cost - expenses;
     return Card(
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -575,9 +594,10 @@ class _SalesPageState extends State<SalesPage> {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildStatColumn('الإيرادات', '$revenue د', AppTheme.primaryColor),
-                _buildStatColumn('رأس المال', '$capital د', AppTheme.warningColor),
+                _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
+                _buildStatColumn('المصروفات', '$expenses د', AppTheme.errorColor),
                 _buildStatColumn('الأرباح', '$profit د', AppTheme.successColor),
-                _buildStatColumn('الفواتير', '$count', AppTheme.textPrimary),
+                _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
               ],
             ),
           ],
@@ -593,6 +613,31 @@ class _SalesPageState extends State<SalesPage> {
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
       ],
+    );
+  }
+
+  Widget _buildInventoryCard() {
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            const Icon(Icons.account_balance, color: AppTheme.primaryColor, size: 28),
+            const SizedBox(width: 12),
+            const Text(
+              'رأس المال (قيمة المخزون)',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const Spacer(),
+            Text(
+              '$_inventoryValue دينار',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

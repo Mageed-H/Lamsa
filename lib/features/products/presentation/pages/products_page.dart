@@ -48,7 +48,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    DatabaseHelper.revision.addListener(_loadAllProducts);
+    DatabaseHelper.productsRevision.addListener(_loadAllProducts);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
       if (_tabController.index == 0) {
@@ -72,7 +72,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   @override
   void dispose() {
     _tabController.dispose();
-    DatabaseHelper.revision.removeListener(_loadAllProducts);
+    DatabaseHelper.productsRevision.removeListener(_loadAllProducts);
     _nameController.dispose();
     _colorController.dispose();
     _sizeController.dispose();
@@ -121,7 +121,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
         title: const Text('إضافة قسم جديد', style: TextStyle(color: AppTheme.primaryColor)),
         content: TextField(
           controller: catController,
-          decoration: const InputDecoration(hintText: 'مثال: جواريب نسائية'),
+          decoration: const InputDecoration(hintText: 'مثال: عطور '),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
@@ -388,7 +388,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
 
             // 2. تفاصيل المنتج
             CustomTextField(
-              label: 'اسم المنتج (مثال: ملفع كويتي)',
+              label: 'اسم المنتج (مثال: عطر جادور)',
               controller: _nameController,
               icon: Icons.shopping_bag,
               validator: (val) => val == null || val.isEmpty ? 'يرجى إدخال اسم المنتج' : null,
