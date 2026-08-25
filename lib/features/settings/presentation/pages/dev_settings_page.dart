@@ -345,7 +345,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('تم النسخ الاحتياطي بنجاح ✓\n$path'),
+            content: Text('تم النسخ الاحتياطي والتحقق من سلامته ✓\n$path'),
             backgroundColor: AppTheme.successColor,
             duration: const Duration(seconds: 4),
           ),

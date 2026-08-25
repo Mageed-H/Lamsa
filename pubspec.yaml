@@ -37,7 +37,7 @@ dependencies:
   crypto: ^3.0.7
   sqflite: ^2.4.2
   path: ^1.9.1
-  sqflite_common_ffi: ^2.4.0+2
+  sqflite_common_ffi: 2.3.7+1
   mobile_scanner: ^5.2.3
   barcode_widget: ^2.0.4
   printing: ^5.14.3
@@ -46,6 +46,7 @@ dependencies:
   barcode: ^2.2.9
   csv: ^6.0.0
   path_provider: ^2.1.5
+  sqlite3: ^2.4.0
 
 dev_dependencies:
   flutter_test:

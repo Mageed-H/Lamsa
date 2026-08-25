@@ -5,20 +5,33 @@ import 'dart:io' show Platform;
 import 'core/theme/app_theme.dart';
 import 'core/widgets/main_layout.dart';
 import 'core/database/database_helper.dart';
+import 'core/services/error_logger.dart';
 
 void main() async {
   // التأكد من تهيئة الفلتر قبل تشغيل أي كود برمجي
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // على الديسكتوب نستخدم FFI عشان يشتغل sqflite — على الموبايل ما نحتاجه
   if (!kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
-  
+
   // تهيئة قاعدة بيانات SQLite قبل فتح التطبيق حتى تكون جاهزة للاستعلامات السريعة
   await DatabaseHelper.instance.database;
-  
+
+  // نسخ احتياطي تلقائي يومي — لا يعطل بدء التشغيل أبداً
+  () async {
+    try {
+      final path = await DatabaseHelper.instance.autoBackupIfNeeded();
+      if (path != null) {
+        await ErrorLogger.instance.info('تم إنشاء نسخة احتياطية تلقائية', data: {'path': path});
+      }
+    } catch (e) {
+      await ErrorLogger.instance.error('خطأ في النسخ الاحتياطي التلقائي', data: {'error': '$e'});
+    }
+  }();
+
   runApp(const CashierApp());
 }
 

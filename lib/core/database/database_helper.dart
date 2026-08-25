@@ -1,12 +1,19 @@
 import 'dart:io';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:sqlite3/sqlite3.dart' as sqlite3_lib;
 import 'package:flutter/foundation.dart' show ValueNotifier, kIsWeb;
 import '../../features/products/data/models/product_model.dart';
+import '../security/db_encryption.dart';
+import '../services/error_logger.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
+
+  /// مفتاح التشفير الحالي (null = بدون تشفير)
+  String? _dbKey;
 
   /// إشعارات منفصلة لكل نوع بيانات — كل صفحة تسمع فقط لتغييراتها
   static final ValueNotifier<int> productsRevision = ValueNotifier(0);
@@ -29,11 +36,14 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDB(String filePath) async {
+    // تحميل مكتبة SQLCipher إن وُجدت — قبل أي فتح للقاعدة
+    DbEncryption.applyLibraryOverride();
+
     String dbPath;
     // على الديسكتوب نستخدم AppData عشان Program Files ما يسمح بالكتابة
     if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-      final appDataDir = Platform.environment['APPDATA'] 
-          ?? Platform.environment['HOME'] 
+      final appDataDir = Platform.environment['APPDATA']
+          ?? Platform.environment['HOME']
           ?? '.';
       final lamsaDir = Directory(join(appDataDir, 'Lamsa'));
       if (!await lamsaDir.exists()) {
@@ -45,13 +55,46 @@ class DatabaseHelper {
     }
     final path = join(dbPath, filePath);
 
+    // ─── إدارة التشفير ───
+    _dbKey = await DbEncryption.getKey();
+
+    if (_dbKey != null && DbEncryption.cipherAvailable) {
+      final isPlain = await DbEncryption.isPlaintextDb(path);
+      if (isPlain && await File(path).exists()) {
+        // قاعدة نصية قديمة → نشفرها في مكانها (ترحيل لمرة واحدة)
+        try {
+          await _encryptExistingDb(path, _dbKey!);
+          await ErrorLogger.instance.info('تم تشفير قاعدة البيانات بنجاح (ترحيل تلقائي)');
+        } catch (e) {
+          await ErrorLogger.instance.error('فشل تشفير قاعدة البيانات — ستعمل بدون تشفير', data: {'error': '$e'});
+          _dbKey = null; // نكمل بدون تشفير حتى لا يتعطل التطبيق
+        }
+      }
+    } else {
+      await ErrorLogger.instance.warning(
+        'التشفير غير مفعّل — ضع sqlcipher.dll بجانب التطبيق لتفعيله',
+      );
+      _dbKey = null;
+    }
+
     return await openDatabase(
       path,
       version: 12, // الإصدار 12: ديون المحل والمصروفات
-      onConfigure: _onConfigure, // تفعيل العلاقات (Foreign Keys)
+      onConfigure: _onConfigure, // مفتاح التشفير + العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
     );
+  }
+
+  /// تشفير قاعدة بيانات نصية موجودة باستخدام PRAGMA rekey
+  Future<void> _encryptExistingDb(String path, String hexKey) async {
+    final db = sqlite3_lib.sqlite3.open(path);
+    try {
+      db.execute(DbEncryption.rekeyPragma(hexKey));
+      db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+    } finally {
+      db.dispose();
+    }
   }
 
   /// مسار ملف قاعدة البيانات
@@ -76,8 +119,10 @@ class DatabaseHelper {
     return '$home${Platform.pathSeparator}.lamsa_backup';
   }
 
-  /// نسخ احتياطي لقاعدة البيانات في مجلد مخفي على D:
-  Future<String> backupDatabase() async {
+  /// نسخ احتياطي لقاعدة البيانات في مجلد مخفي
+  ///
+  /// بعد النسخ يتم التحقق من سلامة النسخة تلقائياً — إذا فشل التحقق تُحذف النسخة ويرمى خطأ.
+  Future<String> backupDatabase({String prefix = 'lamsa_backup_'}) async {
     final srcPath = await getDbFilePath();
     final srcFile = File(srcPath);
     if (!await srcFile.exists()) throw Exception('ملف قاعدة البيانات غير موجود');
@@ -94,13 +139,72 @@ class DatabaseHelper {
 
     final now = DateTime.now();
     final stamp = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}';
-    final destPath = join(_backupDir, 'lamsa_backup_$stamp.db');
+    final destPath = join(_backupDir, '$prefix$stamp.db');
 
     // إغلاق وإعادة فتح لضمان سلامة البيانات
     final db = await database;
     await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
     await srcFile.copy(destPath);
+
+    // ─── تحقق تلقائي فوري ───
+    final verification = await verifyBackup(destPath);
+    if (!verification.isValid) {
+      try {
+        await File(destPath).delete();
+      } catch (_) {}
+      throw Exception('فشل التحقق من سلامة النسخة: ${verification.message}');
+    }
+
+    // حفظ بصمة SHA-256 بجانب الملف
+    await _writeChecksumSidecar(destPath);
     return destPath;
+  }
+
+  /// نسخ احتياطي تلقائي يومي — يُنفذ مرة واحدة يومياً عند أول تشغيل
+  ///
+  /// يعيد مسار النسخة إن أُنشئت، أو null إذا كان هناك نسخة اليوم بالفعل.
+  Future<String?> autoBackupIfNeeded() async {
+    try {
+      final now = DateTime.now();
+      final today = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final last = await getSetting('last_auto_backup', defaultValue: '');
+      if (last == today) return null;
+
+      final path = await backupDatabase(prefix: 'auto_');
+      await setSetting('last_auto_backup', today);
+      await _pruneOldAutoBackups();
+      await ErrorLogger.instance.info('نسخ احتياطي تلقائي يومي', data: {'path': path});
+      return path;
+    } catch (e) {
+      // لا نعطل بدء التطبيق أبداً بسبب فشل النسخ الاحتياطي
+      await ErrorLogger.instance.error('فشل النسخ الاحتياطي التلقائي', data: {'error': '$e'});
+      return null;
+    }
+  }
+
+  /// الاحتفاظ بآخر [maxKeep] نسخ تلقائية وحذف الأقدم
+  static const int maxAutoBackups = 7;
+
+  Future<void> _pruneOldAutoBackups() async {
+    try {
+      final dir = Directory(_backupDir);
+      if (!await dir.exists()) return;
+      final autos = <File>[];
+      await for (final f in dir.list()) {
+        if (f is File && f.path.endsWith('.db')) {
+          final name = f.uri.pathSegments.last;
+          if (name.startsWith('auto_')) autos.add(f);
+        }
+      }
+      autos.sort((a, b) => b.path.compareTo(a.path)); // الأحدث أولاً
+      for (var i = maxAutoBackups; i < autos.length; i++) {
+        try {
+          await autos[i].delete();
+          final sidecar = File('${autos[i].path}.sha256');
+          if (await sidecar.exists()) await sidecar.delete();
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 
   /// قائمة ملفات النسخ الاحتياطي
@@ -112,8 +216,125 @@ class DatabaseHelper {
     return files;
   }
 
+  // ═══════════ التحقق من النسخ الاحتياطية ═══════════
+
+  /// حساب SHA-256 لملف (بث تدريجي لتوفير الذاكرة)
+  static Future<String> computeFileSha256(String path) async {
+    final output = _DigestSink();
+    final input = crypto.sha256.startChunkedConversion(output);
+    await for (final chunk in File(path).openRead()) {
+      input.add(chunk);
+    }
+    input.close();
+    return output.digest.toString();
+  }
+
+  /// كتابة ملف بصمة بجانب النسخة الاحتياطية
+  static Future<void> _writeChecksumSidecar(String dbPath) async {
+    try {
+      final hash = await computeFileSha256(dbPath);
+      await File('$dbPath.sha256').writeAsString(hash);
+    } catch (_) {}
+  }
+
+  /// التحقق من صلاحية نسخة احتياطية
+  ///
+  /// يفحص: وجود الملف وحجمه، تكامل البيانات الداخلية، وجود الجداول الأساسية.
+  Future<BackupVerificationResult> verifyBackup(String path) async {
+    // 1. وجود الملف وحجمه
+    final file = File(path);
+    if (!await file.exists()) {
+      return BackupVerificationResult(false, 'الملف غير موجود');
+    }
+    final size = await file.length();
+    if (size < 4096) {
+      return BackupVerificationResult(false, 'حجم الملف صغير جداً ($size بايت) — ملف تالف');
+    }
+
+    // 2. تحديد نوع الملف (مشفر أم نصي)
+    final plain = await DbEncryption.isPlaintextDb(path);
+
+    // 3. التحقق من بصمة SHA-256 إن وجدت
+    final sidecar = File('$path.sha256');
+    String? hashNote;
+    if (await sidecar.exists()) {
+      try {
+        final expected = (await sidecar.readAsString()).trim();
+        final actual = await computeFileSha256(path);
+        if (expected != actual) {
+          return BackupVerificationResult(
+            false,
+            'بصمة SHA-256 لا تتطابق — الملف عدّل أو تالف',
+          );
+        }
+        hashNote = 'البصمة متطابقة ✓';
+      } catch (_) {}
+    }
+
+    // 4. الفتح والتكامل الداخلي
+    sqlite3_lib.Database? raw;
+    try {
+      raw = sqlite3_lib.sqlite3.open(path);
+
+      // تطبيق مفتاح التشفير على الملفات المشفرة
+      if (!plain && _dbKey != null) {
+        raw.execute(DbEncryption.keyPragma(_dbKey!));
+      }
+
+      // اختبار قراءة حقيقية بعد المفتاح — يفشل هنا لو المفتاح/التشفير خاطئ
+      final integrity = raw.select('PRAGMA integrity_check');
+      if (integrity.isEmpty ||
+          integrity.first.values.first.toString().toLowerCase() != 'ok') {
+        return BackupVerificationResult(false, 'فشل فحص integrity_check');
+      }
+
+      // 5. الجداول الأساسية موجودة؟
+      const requiredTables = [
+        'products', 'categories', 'sales', 'sale_items', 'settings', 'debts',
+      ];
+      final counts = <String, int>{};
+      for (final t in requiredTables) {
+        final exists = raw.select(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+          [t],
+        );
+        if (exists.isEmpty) {
+          return BackupVerificationResult(false, 'جدول "$t" مفقود من النسخة');
+        }
+        counts[t] = raw.select('SELECT COUNT(*) c FROM $t').first['c'] as int;
+      }
+
+      return BackupVerificationResult(
+        true,
+        hashNote ?? 'سلامة كاملة ✓ (بدون بصمة محفوظة)',
+        tableCounts: counts,
+      );
+    } catch (e) {
+      final hint = (!plain && _dbKey == null)
+          ? ' — قد تكون مشفرة والمفتاح غير متوفر'
+          : '';
+      return BackupVerificationResult(false, 'تعذر فتح الملف$hint: $e');
+    } finally {
+      try {
+        raw?.dispose();
+      } catch (_) {}
+    }
+  }
+
   /// استيراد قاعدة بيانات من ملف نسخة احتياطية
+  ///
+  /// يتم التحقق من سلامة النسخة قبل الاستبدال — الاستيراد يُرفض إذا كانت النسخة تالفة.
   Future<bool> restoreDatabase(String backupPath) async {
+    // ─── تحقق قبل أي شيء ───
+    final verification = await verifyBackup(backupPath);
+    if (!verification.isValid) {
+      await ErrorLogger.instance.error(
+        'رُفض استيراد نسخة تالفة',
+        data: {'path': backupPath, 'reason': verification.message},
+      );
+      return false;
+    }
+
     final backupFile = File(backupPath);
     if (!await backupFile.exists()) return false;
 
@@ -131,11 +352,15 @@ class DatabaseHelper {
     // إعادة فتح القاعدة
     _database = await _initDB('cashier_system.db');
     revision.value++;
+    await ErrorLogger.instance.info('تم استيراد نسخة احتياطية', data: {'path': backupPath});
     return true;
   }
 
-  // تفعيل الـ Foreign Keys في SQLite
+  // أول أمر على كل اتصال: مفتاح التشفير (إن كان مفعلاً) ثم Foreign Keys
   Future _onConfigure(Database db) async {
+    if (_dbKey != null) {
+      await db.execute(DbEncryption.keyPragma(_dbKey!));
+    }
     await db.execute('PRAGMA foreign_keys = ON');
   }
 
@@ -1560,4 +1785,33 @@ class DatabaseHelper {
       return [];
     }
   }
+}
+
+/// نتيجة التحقق من نسخة احتياطية
+class BackupVerificationResult {
+  final bool isValid;
+  final String message;
+  final Map<String, int> tableCounts;
+
+  const BackupVerificationResult(
+    this.isValid,
+    this.message, {
+    this.tableCounts = const {},
+  });
+
+  @override
+  String toString() =>
+      isValid ? 'صالحة ✓ ($message)' : 'غير صالحة ✗ ($message)';
+}
+
+/// Sink داخلي لجمع نتيجة هاش SHA-256 التدريجي
+class _DigestSink implements Sink<crypto.Digest> {
+  late crypto.Digest _digest;
+  crypto.Digest get digest => _digest;
+
+  @override
+  void add(crypto.Digest data) => _digest = data;
+
+  @override
+  void close() {}
 }
