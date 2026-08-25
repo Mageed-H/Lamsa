@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:lamsa/core/database/database_helper.dart';
 import 'package:lamsa/core/theme/app_theme.dart';
+import 'package:lamsa/features/sales/presentation/widgets/weekly_sales_chart.dart';
 
 enum SalesFilter { today, thisWeek, thisMonth, customMonth, customRange, all }
 
@@ -24,6 +25,9 @@ class _SalesPageState extends State<SalesPage> {
   List<Map<String, dynamic>> _expenses = [];
   bool _isLoading = true;
   SalesFilter _activeFilter = SalesFilter.today;
+
+  /// العرض التدريجي — عدد الفواتير الظاهرة
+  int _visibleSales = 50;
   DateTime? _selectedMonth;
   DateTimeRange? _selectedRange;
 
@@ -96,7 +100,10 @@ class _SalesPageState extends State<SalesPage> {
   }
 
   void _setFilter(SalesFilter filter) {
-    setState(() => _activeFilter = filter);
+    setState(() {
+      _activeFilter = filter;
+      _visibleSales = 50; // إعادة ضبط العرض التدريجي عند تغيير الفلتر
+    });
     _loadData();
   }
 
@@ -426,6 +433,9 @@ class _SalesPageState extends State<SalesPage> {
                         textAlign: TextAlign.center,
                       ),
                     ),
+                  // رسم بياني — مبيعات وأرباح آخر 7 أيام
+                  const WeeklySalesChart(days: 7),
+                  const SizedBox(height: 12),
                   // عنوان القائمة
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -434,8 +444,17 @@ class _SalesPageState extends State<SalesPage> {
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary),
                     ),
                   ),
-                  // قائمة الفواتير
-                  ..._sales.map((sale) => _buildSaleCard(sale)),
+                  // قائمة الفواتير — عرض تدريجي (50 فاتورة في المرة)
+                  ..._sales.take(_visibleSales).map((sale) => _buildSaleCard(sale)),
+                  if (_sales.length > _visibleSales)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: OutlinedButton.icon(
+                        onPressed: () => setState(() => _visibleSales += 50),
+                        icon: const Icon(Icons.expand_more),
+                        label: Text('عرض المزيد (${_sales.length - _visibleSales} فاتورة متبقية)'),
+                      ),
+                    ),
                   if (_sales.isEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 40),

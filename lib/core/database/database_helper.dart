@@ -79,7 +79,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 12, // الإصدار 12: ديون المحل والمصروفات
+      version: 13, // الإصدار 13: سجل تصحيح الجرد
       onConfigure: _onConfigure, // مفتاح التشفير + العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -393,6 +393,7 @@ class DatabaseHelper {
     await _createV10Tables(db);
     await _createV11Tables(db);
     await _createV12Tables(db);
+    await _createV13Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -434,6 +435,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 12) {
       await _createV12Tables(db);
+    }
+    if (oldVersion < 13) {
+      await _createV13Tables(db);
     }
   }
 
@@ -1132,6 +1136,82 @@ class DatabaseHelper {
     await db.execute('CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses (created_at);');
   }
 
+  // ==========================================================
+  // الإصدار 13: سجل تصحيح الجرد
+  // ==========================================================
+  Future _createV13Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS stock_adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL,
+        old_stock INTEGER NOT NULL,
+        new_stock INTEGER NOT NULL,
+        difference INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sa_product ON stock_adjustments (product_id);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sa_date ON stock_adjustments (created_at);');
+  }
+
+  /// تصحيح جرد منتج يدوياً مع تسجيل السبب
+  ///
+  /// يعيد true عند النجاح. يُرفض التعديل إذا كان الرقم سالباً أو لم يتغير.
+  Future<bool> adjustStock(int productId, int newStock, String reason) async {
+    if (newStock < 0) return false;
+    try {
+      final db = await instance.database;
+      return await db.transaction((txn) async {
+        final rows = await txn.query('products', where: 'id = ?', whereArgs: [productId]);
+        if (rows.isEmpty) return false;
+        final product = ProductModel.fromMap(rows.first);
+        final oldStock = product.stock;
+        if (newStock == oldStock) return false;
+
+        await txn.update(
+          'products',
+          {'stock': newStock},
+          where: 'id = ?',
+          whereArgs: [productId],
+        );
+
+        final now = DateTime.now().toIso8601String();
+        await txn.insert('stock_adjustments', {
+          'product_id': productId,
+          'product_name': product.name,
+          'old_stock': oldStock,
+          'new_stock': newStock,
+          'difference': newStock - oldStock,
+          'reason': reason.trim(),
+          'created_at': now,
+        });
+        return true;
+      });
+    } catch (e) {
+      await ErrorLogger.instance.error('فشل تصحيح الجرد', data: {'product_id': productId, 'error': '$e'});
+      return false;
+    }
+  }
+
+  /// سجل تصحيحات الجرد لمنتج معين (الأحدث أولاً)
+  Future<List<Map<String, dynamic>>> getAdjustmentsForProduct(int productId) async {
+    try {
+      final db = await instance.database;
+      return await db.query(
+        'stock_adjustments',
+        where: 'product_id = ?',
+        whereArgs: [productId],
+        orderBy: 'created_at DESC',
+        limit: 50,
+      );
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// جلب بيانات الخصم من فاتورة معلقة
   Future<Map<String, int>> getSuspendedOrderDiscount(int orderId) async {
     try {
@@ -1672,6 +1752,43 @@ class DatabaseHelper {
       return {'total': result.first['total'] as int? ?? 0};
     } catch (e) {
       return {'total': 0};
+    }
+  }
+
+  /// بيانات الرسم البياني — مبيعات وأرباح آخر [days] يوم
+  Future<List<Map<String, dynamic>>> getDailySalesChart({int days = 7}) async {
+    try {
+      final db = await instance.database;
+      final today = DateTime.now();
+      final from = today.subtract(Duration(days: days - 1));
+      final fromStr = '${from.year}-${from.month.toString().padLeft(2, '0')}-${from.day.toString().padLeft(2, '0')}';
+
+      final rows = await db.rawQuery('''
+        SELECT substr(created_at, 1, 10) as day,
+               COALESCE(SUM(total_amount), 0) as revenue,
+               COALESCE(SUM(total_profit), 0) as profit
+        FROM sales
+        WHERE created_at >= ?
+        GROUP BY day
+      ''', [fromStr]);
+
+      // نملأ الأيام الفارغة بصفر
+      final byDay = {for (final r in rows) r['day'] as String: r};
+      final result = <Map<String, dynamic>>[];
+      for (var i = 0; i < days; i++) {
+        final d = from.add(Duration(days: i));
+        final key = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+        final row = byDay[key];
+        result.add({
+          'day': key,
+          'label': '${d.day}/${d.month}',
+          'revenue': row?['revenue'] as int? ?? 0,
+          'profit': row?['profit'] as int? ?? 0,
+        });
+      }
+      return result;
+    } catch (_) {
+      return [];
     }
   }
 

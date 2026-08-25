@@ -25,6 +25,9 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
   bool _isLoading = true;
   DebtsFilter _activeFilter = DebtsFilter.unpaid;
 
+  /// العرض التدريجي — عدد البطاقات الظاهرة حالياً
+  int _visibleDebts = 30;
+
   /// تنسيق التاريخ: 2026/08/19 11:37 (بدون ثواني)
   String _formatDate(String? iso) {
     if (iso == null || iso.isEmpty) return '';
@@ -891,8 +894,19 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
                             ),
                           ),
                         )
-                      else
-                        ..._filteredDebts.map((debt) => _buildDebtCard(debt)),
+                      else ...[
+                        // عرض تدريجي — 30 عنصر في المرة لسلاسة أكبر مع القوائم الضخمة
+                        ..._filteredDebts.take(_visibleDebts).map((debt) => _buildDebtCard(debt)),
+                        if (_filteredDebts.length > _visibleDebts)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: OutlinedButton.icon(
+                              onPressed: () => setState(() => _visibleDebts += 30),
+                              icon: const Icon(Icons.expand_more),
+                              label: Text('عرض المزيد (${_filteredDebts.length - _visibleDebts} متبقية)'),
+                            ),
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -964,7 +978,10 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
   Widget _buildFilterChip(String label, DebtsFilter filter, IconData icon) {
     final isActive = _activeFilter == filter;
     return GestureDetector(
-      onTap: () => setState(() => _activeFilter = filter),
+      onTap: () => setState(() {
+        _activeFilter = filter;
+        _visibleDebts = 30; // إعادة ضبط العرض التدريجي عند تغيير الفلتر
+      }),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(

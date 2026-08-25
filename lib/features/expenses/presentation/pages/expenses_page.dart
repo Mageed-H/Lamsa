@@ -17,6 +17,9 @@ class _ExpensesPageState extends State<ExpensesPage> {
   Map<String, int> _summary = {};
   bool _isLoading = true;
 
+  /// العرض التدريجي — عدد الأيام الظاهرة
+  int _visibleDays = 7;
+
   static const List<String> _expenseCategories = [
     'يوميات',
     'مشتريات',
@@ -357,7 +360,7 @@ class _ExpensesPageState extends State<ExpensesPage> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // المصروفات مجمّعة حسب اليوم
+                  // المصروفات مجمّعة حسب اليوم — عرض تدريجي (7 أيام في المرة)
                   if (days.isEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 40),
@@ -368,8 +371,18 @@ class _ExpensesPageState extends State<ExpensesPage> {
                         ),
                       ),
                     )
-                  else
-                    ...days.map((day) => _buildDaySection(day, grouped[day]!)),
+                  else ...[
+                    ...days.take(_visibleDays).map((day) => _buildDaySection(day, grouped[day]!)),
+                    if (days.length > _visibleDays)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: OutlinedButton.icon(
+                          onPressed: () => setState(() => _visibleDays += 7),
+                          icon: const Icon(Icons.expand_more),
+                          label: Text('عرض أيام أكثر (${days.length - _visibleDays} يوم متبقي)'),
+                        ),
+                      ),
+                  ],
                 ],
               ),
             ),

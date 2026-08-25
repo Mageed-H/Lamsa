@@ -594,6 +594,11 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                                   tooltip: 'تعديل',
                                 ),
                                 IconButton(
+                                  icon: const Icon(Icons.inventory, color: AppTheme.warningColor),
+                                  onPressed: () => _showStockAdjustDialog(p),
+                                  tooltip: 'تصحيح الجرد',
+                                ),
+                                IconButton(
                                   icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
                                   onPressed: () => _confirmDelete(p),
                                   tooltip: 'حذف',
@@ -603,9 +608,150 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                           ),
                         );
                       },
-                    ),
+                     ),
         ),
       ],
+    );
+  }
+
+  // ─── حوار تصحيح الجرد ───
+  Future<void> _showStockAdjustDialog(ProductModel product) async {
+    final qtyCtrl = TextEditingController(text: '${product.stock}');
+    String reason = 'عدّ صندوق';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final newStock = int.tryParse(qtyCtrl.text) ?? product.stock;
+          final diff = newStock - product.stock;
+          return AlertDialog(
+            title: Text('تصحيح الجرد — ${product.name}',
+                style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.neutralLightColor,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        Column(children: [
+                          Text('${product.stock}',
+                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
+                          const Text('الحالي', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                        ]),
+                        const Icon(Icons.arrow_back, color: AppTheme.textSecondary),
+                        Column(children: [
+                          Text('$newStock',
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold,
+                                  color: diff == 0 ? AppTheme.textSecondary : (diff > 0 ? AppTheme.successColor : AppTheme.errorColor))),
+                          const Text('الجديد', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                        ]),
+                        if (diff != 0)
+                          Column(children: [
+                            Text(diff > 0 ? '+$diff' : '$diff',
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold,
+                                    color: diff > 0 ? AppTheme.successColor : AppTheme.errorColor)),
+                            const Text('الفرق', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                          ]),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: qtyCtrl,
+                    keyboardType: TextInputType.number,
+                    autofocus: true,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                    decoration: const InputDecoration(
+                      labelText: 'الكمية الصحيحة',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.inventory_2),
+                    ),
+                    onChanged: (_) => setDialogState(() {}),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('سبب التصحيح:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...['عدّ صندوق', 'تالف / تلف', 'منتهي الصلاحية', 'مسروق / مفقود'].map((r) =>
+                    RadioListTile<String>(
+                      value: r,
+                      groupValue: reason,
+                      activeColor: AppTheme.primaryColor,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text(r, style: const TextStyle(fontSize: 14)),
+                      onChanged: (v) => setDialogState(() => reason = v!),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: (diff != 0 && newStock >= 0) ? AppTheme.warningColor : AppTheme.neutralColor,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: (diff != 0 && newStock >= 0) ? () => Navigator.pop(ctx, true) : null,
+                icon: const Icon(Icons.check),
+                label: const Text('تطبيق التصحيح'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed != true) return;
+    final newStock = int.tryParse(qtyCtrl.text) ?? -1;
+    final pid = product.id;
+    if (pid == null) return;
+    final ok = await DatabaseHelper.instance.adjustStock(pid, newStock, reason);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'تم تصحيح الجرد ✓ (${product.name}: ${product.stock} ← $newStock)' : 'فشل التصحيح — تأكد من الرقم'),
+        backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
+      ),
+    );
+    if (ok) _showAdjustmentHistory(pid);
+  }
+
+  /// عرض سجل تصحيحات الجرد لمنتج
+  Future<void> _showAdjustmentHistory(int productId) async {
+    final adjustments = await DatabaseHelper.instance.getAdjustmentsForProduct(productId);
+    if (!mounted || adjustments.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => ListView(
+        padding: const EdgeInsets.all(16),
+        shrinkWrap: true,
+        children: [
+          const Center(child: Text('سجل تصحيحات الجرد', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.primaryColor))),
+          const SizedBox(height: 12),
+          ...adjustments.map((a) {
+            final diff = a['difference'] as int? ?? 0;
+            return ListTile(
+              leading: Icon(
+                diff > 0 ? Icons.add_circle : Icons.remove_circle,
+                color: diff > 0 ? AppTheme.successColor : AppTheme.errorColor,
+              ),
+              title: Text('${a['old_stock']} ← ${a['new_stock']} (${a['reason']})', style: const TextStyle(fontSize: 13)),
+              subtitle: Text((a['created_at'] as String).substring(0, 16).replaceAll('T', ' '), style: const TextStyle(fontSize: 11)),
+            );
+          }),
+        ],
+      ),
     );
   }
 }

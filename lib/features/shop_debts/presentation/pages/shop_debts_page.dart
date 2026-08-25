@@ -20,6 +20,9 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
   Map<String, int> _summary = {};
   bool _isLoading = true;
 
+  /// العرض التدريجي — عدد البطاقات الظاهرة
+  int _visibleDebts = 30;
+
   @override
   void initState() {
     super.initState();
@@ -545,14 +548,14 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // القائمة
+                  // القائمة — عرض تدريجي (30 عنصر في المرة)
                   if (_debts.isEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 40),
                       child: Center(child: Text('لا توجد ديون على المحل', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 16))),
                     )
-                  else
-                    ..._debts.map((debt) {
+                  else ...[
+                    ..._debts.take(_visibleDebts).map((debt) {
                       final supplierName = debt['supplier_name'] as String;
                       final totalAmount = debt['amount'] as int;
                       final paidAmount = debt['paid'] as int? ?? 0;
@@ -626,6 +629,16 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
                         ),
                       );
                     }),
+                    if (_debts.length > _visibleDebts)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: OutlinedButton.icon(
+                          onPressed: () => setState(() => _visibleDebts += 30),
+                          icon: const Icon(Icons.expand_more),
+                          label: Text('عرض المزيد (${_debts.length - _visibleDebts} متبقية)'),
+                        ),
+                      ),
+                  ],
                 ],
               ),
             ),
