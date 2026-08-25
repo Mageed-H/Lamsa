@@ -126,6 +126,13 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
                 );
                 return;
               }
+              final amount = int.tryParse(amountCtrl.text.trim());
+              if (amount == null || amount <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('الرجاء إدخال مبلغ صحيح أكبر من صفر'), backgroundColor: AppTheme.errorColor),
+                );
+                return;
+              }
               Navigator.pop(ctx, true);
             },
             child: const Text('حفظ'),
@@ -142,9 +149,12 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
         amount: amount,
         note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
       );
-      if (mounted && result > 0) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم إضافة الدين بنجاح'), backgroundColor: AppTheme.successColor),
+          SnackBar(
+            content: Text(result > 0 ? 'تم إضافة الدين بنجاح' : 'فشل حفظ الدين — حاول مجدداً'),
+            backgroundColor: result > 0 ? AppTheme.successColor : AppTheme.errorColor,
+          ),
         );
       }
     }
@@ -243,14 +253,23 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
     if (confirmed == true) {
       final payAmount = int.tryParse(payCtrl.text.trim()) ?? 0;
       final success = await DatabaseHelper.instance.payShopDebt(debtId, payAmount);
-      if (mounted && success) {
-        final newRemaining = remaining - payAmount;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(newRemaining <= 0 ? 'تم سداد الدين بالكامل ✓' : 'تم التسديد | المتبقي: $newRemaining دينار'),
-            backgroundColor: AppTheme.successColor,
-          ),
-        );
+      if (mounted) {
+        if (success) {
+          final newRemaining = remaining - payAmount;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(newRemaining <= 0 ? 'تم سداد الدين بالكامل ✓' : 'تم التسديد | المتبقي: $newRemaining دينار'),
+              backgroundColor: AppTheme.successColor,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('فشل تسجيل الدفعة! لم يُخصم شيء — حاول مجدداً'),
+              backgroundColor: AppTheme.errorColor,
+            ),
+          );
+        }
       }
     }
   }
@@ -428,7 +447,22 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () {
+              if (nameCtrl.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('اسم المورد مطلوب'), backgroundColor: AppTheme.errorColor),
+                );
+                return;
+              }
+              final amount = int.tryParse(amountCtrl.text.trim());
+              if (amount == null || amount <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('الرجاء إدخال مبلغ صحيح أكبر من صفر'), backgroundColor: AppTheme.errorColor),
+                );
+                return;
+              }
+              Navigator.pop(ctx, true);
+            },
             child: const Text('حفظ'),
           ),
         ],
@@ -437,13 +471,21 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
 
     if (confirmed == true) {
       final amount = int.tryParse(amountCtrl.text.trim()) ?? debt['amount'];
-      await DatabaseHelper.instance.updateShopDebt(
+      final ok = await DatabaseHelper.instance.updateShopDebt(
         debt['id'] as int,
         supplierName: nameCtrl.text.trim(),
         phone: phoneCtrl.text.trim(),
         amount: amount,
         note: noteCtrl.text.trim(),
       );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ok ? 'تم تحديث الدين ✓' : 'فشل التحديث — حاول مجدداً'),
+            backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
+          ),
+        );
+      }
     }
   }
 
@@ -464,7 +506,15 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
       ),
     );
     if (confirmed == true) {
-      await DatabaseHelper.instance.deleteShopDebt(debt['id'] as int);
+      final ok = await DatabaseHelper.instance.deleteShopDebt(debt['id'] as int);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ok ? 'تم حذف الدين' : 'فشل الحذف — حاول مجدداً'),
+            backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
+          ),
+        );
+      }
     }
   }
 

@@ -214,6 +214,27 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
     }
   }
 
+  // ─── مدققو الحقول الرقمية — يرفضون الحروف والأرقام العربية والسالب ───
+  static String? _validatePositiveInt(String? val) {
+    final v = val?.trim() ?? '';
+    if (v.isEmpty) return 'هذا الحقل مطلوب';
+    final n = int.tryParse(v);
+    if (n == null) return 'أدخل رقماً صحيحاً فقط';
+    if (n <= 0) return 'يجب أن يكون أكبر من صفر';
+    if (n > 999999999) return 'رقم كبير جداً';
+    return null;
+  }
+
+  static String? _validateNonNegativeInt(String? val) {
+    final v = val?.trim() ?? '';
+    if (v.isEmpty) return 'هذا الحقل مطلوب';
+    final n = int.tryParse(v);
+    if (n == null) return 'أدخل رقماً صحيحاً فقط';
+    if (n < 0) return 'لا يمكن أن يكون سالباً';
+    if (n > 999999999) return 'رقم كبير جداً';
+    return null;
+  }
+
   // تنظيف مدخلات الماسح الضوئي من الرموز الزائدة
   String _cleanBarcode(String raw) {
     return raw.trim().replaceAll(RegExp(r'[^a-zA-Z0-9\-]'), '');
@@ -391,7 +412,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
               label: 'اسم المنتج (مثال: عطر جادور)',
               controller: _nameController,
               icon: Icons.shopping_bag,
-              validator: (val) => val == null || val.isEmpty ? 'يرجى إدخال اسم المنتج' : null,
+              validator: (val) => val == null || val.trim().isEmpty ? 'يرجى إدخال اسم المنتج' : null,
             ),
             Row(
               children: [
@@ -414,7 +435,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                     controller: _purchasePriceController,
                     keyboardType: TextInputType.number,
                     icon: Icons.trending_down,
-                    validator: (val) => val == null || val.isEmpty ? 'يرجى إدخال سعر الشراء' : null,
+                    validator: _validatePositiveInt,
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -424,7 +445,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                     controller: _priceController,
                     keyboardType: TextInputType.number,
                     icon: Icons.trending_up,
-                    validator: (val) => val == null || val.isEmpty ? 'يرجى إدخال سعر البيع' : null,
+                    validator: _validatePositiveInt,
                   ),
                 ),
               ],
@@ -434,7 +455,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
               controller: _stockController,
               keyboardType: TextInputType.number,
               icon: Icons.inventory,
-              validator: (val) => val == null || val.isEmpty ? 'يرجى إدخال الكمية' : null,
+              validator: _validateNonNegativeInt,
             ),
             const Divider(height: 32, thickness: 1),
 
@@ -1050,17 +1071,52 @@ class _EditProductDialogState extends State<_EditProductDialog> {
         ElevatedButton(
           style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
           onPressed: () async {
+            // ─── تحقق صريح — لا تحويلات صامتة ───
+            final name = _nameCtrl.text.trim();
+            if (name.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('اسم المنتج مطلوب'), backgroundColor: AppTheme.errorColor),
+              );
+              return;
+            }
+            final price = int.tryParse(_priceCtrl.text.trim());
+            final purchase = int.tryParse(_purchasePriceCtrl.text.trim());
+            final stock = int.tryParse(_stockCtrl.text.trim());
+            String? error;
+            if (price == null || price <= 0) {
+              error = 'سعر البيع يجب أن يكون رقماً أكبر من صفر';
+            } else if (purchase == null || purchase < 0) {
+              error = 'سعر الشراء غير صالح';
+            } else if (stock == null || stock < 0) {
+              error = 'المخزون يجب أن يكون رقماً غير سالب';
+            } else if (price < purchase) {
+              error = 'سعر البيع أقل من سعر الشراء!';
+            }
+            if (error != null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(error), backgroundColor: AppTheme.errorColor),
+              );
+              return;
+            }
+
             final updated = widget.product.copyWith(
-              name: _nameCtrl.text.trim().isNotEmpty ? _nameCtrl.text.trim() : widget.product.name,
+              name: name,
               color: _colorCtrl.text.trim(),
               size: _sizeCtrl.text.trim(),
-              price: int.tryParse(_priceCtrl.text.trim()) ?? widget.product.price,
-              purchasePrice: int.tryParse(_purchasePriceCtrl.text.trim()) ?? widget.product.purchasePrice,
-              stock: int.tryParse(_stockCtrl.text.trim()) ?? widget.product.stock,
+              price: price,
+              purchasePrice: purchase,
+              stock: stock,
             );
-            await DatabaseHelper.instance.updateProduct(updated);
-            if (context.mounted) Navigator.pop(context);
-            widget.onSaved();
+            final rows = await DatabaseHelper.instance.updateProduct(updated);
+            if (!context.mounted) return;
+            if (rows > 0) {
+              Navigator.pop(context);
+              widget.onSaved();
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('فشل حفظ التعديلات'), backgroundColor: AppTheme.errorColor),
+              );
+            }
           },
           child: const Text('حفظ التعديلات'),
         ),

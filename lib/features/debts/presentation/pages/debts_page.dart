@@ -332,6 +332,13 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
               backgroundColor: AppTheme.successColor,
             ),
           );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('فشل تسجيل الدفعة! لم يُخصم شيء — حاول مجدداً'),
+              backgroundColor: AppTheme.errorColor,
+            ),
+          );
         }
       }
     }
@@ -416,7 +423,22 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
               backgroundColor: AppTheme.primaryColor,
               foregroundColor: Colors.white,
             ),
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () {
+              if (nameCtrl.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('اسم الزبون مطلوب'), backgroundColor: AppTheme.errorColor),
+                );
+                return;
+              }
+              final amount = int.tryParse(amountCtrl.text.trim());
+              if (amount == null || amount <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('الرجاء إدخال مبلغ صحيح أكبر من صفر'), backgroundColor: AppTheme.errorColor),
+                );
+                return;
+              }
+              Navigator.pop(ctx, true);
+            },
             child: const Text('حفظ'),
           ),
         ],
@@ -425,13 +447,21 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
 
     if (confirmed == true) {
       final amount = int.tryParse(amountCtrl.text.trim()) ?? debt['amount'];
-      await DatabaseHelper.instance.updateDebt(
+      final ok = await DatabaseHelper.instance.updateDebt(
         debt['id'] as int,
         customerName: nameCtrl.text.trim(),
         phone: phoneCtrl.text.trim(),
         amount: amount,
         note: noteCtrl.text.trim(),
       );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ok ? 'تم تحديث الدين ✓' : 'فشل التحديث — حاول مجدداً'),
+            backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
+          ),
+        );
+      }
     }
   }
 
@@ -458,12 +488,12 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
     );
 
     if (confirmed == true) {
-      await DatabaseHelper.instance.deleteDebt(debt['id'] as int);
+      final ok = await DatabaseHelper.instance.deleteDebt(debt['id'] as int);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('تم حذف الدين'),
-            backgroundColor: AppTheme.successColor,
+          SnackBar(
+            content: Text(ok ? 'تم حذف الدين' : 'فشل الحذف — حاول مجدداً'),
+            backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
           ),
         );
       }

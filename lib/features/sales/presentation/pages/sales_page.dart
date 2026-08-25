@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:lamsa/core/database/database_helper.dart';
+import 'package:lamsa/core/services/error_logger.dart';
 import 'package:lamsa/core/theme/app_theme.dart';
 import 'package:lamsa/features/sales/presentation/widgets/weekly_sales_chart.dart';
 
@@ -191,6 +192,23 @@ class _SalesPageState extends State<SalesPage> {
 
   // ─── تصدير تقرير المبيعات كـ PDF ───
   Future<void> _exportSalesReport() async {
+    try {
+      await _doExportSalesReport();
+    } catch (e) {
+      await ErrorLogger.instance.error('فشل تصدير تقرير المبيعات PDF', data: {'error': '$e'});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('فشل التصدير: $e'),
+            backgroundColor: AppTheme.errorColor,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _doExportSalesReport() async {
     final settings = await DatabaseHelper.instance.getAllSettings();
     final storeName = settings['store_name'] ?? 'أحلى الحلوين';
     final currency = settings['currency'] ?? 'دينار';

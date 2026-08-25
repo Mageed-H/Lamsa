@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
@@ -321,39 +321,92 @@ class DatabaseHelper {
     }
   }
 
-  /// استيراد قاعدة بيانات من ملف نسخة احتياطية
+  /// استيراد قاعدة بيانات من ملف نسخة احتياطية — **ذرّي وآمن**
   ///
-  /// يتم التحقق من سلامة النسخة قبل الاستبدال — الاستيراد يُرفض إذا كانت النسخة تالفة.
+  /// الترتيب: تحقق النسخة الأصلية ← إغلاق القاعدة ← نسخ إلى ملف مؤقت ←
+  /// تحقق المؤقت ← الاحتفاظ بنسخة أمان من الحالي ← تبديل ذرّي (rename) ←
+  /// فتح. عند أي فشل: تراجع تلقائي للنسخة السابقة ولا تُلمس البيانات.
   Future<bool> restoreDatabase(String backupPath) async {
-    // ─── تحقق قبل أي شيء ───
-    final verification = await verifyBackup(backupPath);
-    if (!verification.isValid) {
-      await ErrorLogger.instance.error(
-        'رُفض استيراد نسخة تالفة',
-        data: {'path': backupPath, 'reason': verification.message},
-      );
+    File? tmpFile;
+    String? bakPath;
+    try {
+      // ─── 1. تحقق النسخة المصدر ───
+      final verification = await verifyBackup(backupPath);
+      if (!verification.isValid) {
+        await ErrorLogger.instance.error(
+          'رُفض استيراد نسخة تالفة',
+          data: {'path': backupPath, 'reason': verification.message},
+        );
+        return false;
+      }
+
+      final destPath = await getDbFilePath();
+
+      // checkpoint قبل الإغلاق لضمان كتابة كل شيء في الملف الرئيسي
+      if (_database != null) {
+        try {
+          await _database!.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+          await _database!.close();
+        } catch (_) {}
+        _database = null;
+      }
+
+      // ─── 2. نسخ إلى ملف مؤقت بجانب الوجهة (نفس القرص = rename ذرّي) ───
+      tmpFile = File('$destPath.restore_tmp');
+      if (await tmpFile.exists()) await tmpFile.delete();
+      await File(backupPath).copy(tmpFile.path);
+
+      // ─── 3. تحقق الملف المنسوخ (ليس الأصلي فقط) ───
+      final tmpCheck = await verifyBackup(tmpFile.path);
+      if (!tmpCheck.isValid) {
+        throw Exception('النسخة فشلت بعد النسخ: ${tmpCheck.message}');
+      }
+
+      // ─── 4. نسخة أمان من القاعدة الحية + تنظيف WAL/SHM القديمة ───
+      final live = File(destPath);
+      if (await live.exists()) {
+        bakPath = '$destPath.bak_before_restore';
+        final oldBak = File(bakPath);
+        if (await oldBak.exists()) await oldBak.delete();
+        await live.rename(bakPath);
+      }
+      for (final suffix in ['-wal', '-shm']) {
+        final f = File('$destPath$suffix');
+        if (await f.exists()) await f.delete();
+      }
+
+      // ─── 5. التبديل الذرّي ───
+      await tmpFile.rename(destPath);
+      tmpFile = null; // نجح النقل
+
+      // ─── 6. فتح القاعدة الجديدة ───
+      _database = await _initDB('cashier_system.db');
+      revision.value++;
+      await ErrorLogger.instance.info('تم استيراد نسخة احتياطية بنجاح', data: {'path': backupPath});
+      return true;
+    } catch (e) {
+      await ErrorLogger.instance.error('فشل الاستيراد — تراجع للنسخة السابقة', data: {'error': '$e'});
+      // ─── Rollback: إرجاع نسخة الأمان إن كان التبديل قد بدأ ───
+      try {
+        final destPath = await getDbFilePath();
+        if (bakPath != null) {
+          final bak = File(bakPath);
+          if (await bak.exists()) {
+            final broken = File(destPath);
+            if (await broken.exists()) await broken.delete();
+            await bak.rename(destPath);
+          }
+        }
+      } catch (rollbackErr) {
+        await ErrorLogger.instance.critical('فشل حتى التراجع!', data: {'rollback': '$rollbackErr'});
+      }
       return false;
+    } finally {
+      // تنظيف الملفات المؤقتة مهما حدث
+      try {
+        if (tmpFile != null && await tmpFile.exists()) await tmpFile.delete();
+      } catch (_) {}
     }
-
-    final backupFile = File(backupPath);
-    if (!await backupFile.exists()) return false;
-
-    final destPath = await getDbFilePath();
-
-    // إغلاق قاعدة البيانات الحالية
-    if (_database != null) {
-      await _database!.close();
-      _database = null;
-    }
-
-    // نسخ الملف الاحتياطي فوق القاعدة الحالية
-    await backupFile.copy(destPath);
-
-    // إعادة فتح القاعدة
-    _database = await _initDB('cashier_system.db');
-    revision.value++;
-    await ErrorLogger.instance.info('تم استيراد نسخة احتياطية', data: {'path': backupPath});
-    return true;
   }
 
   // أول أمر على كل اتصال: مفتاح التشفير (إن كان مفعلاً) ثم Foreign Keys
@@ -720,26 +773,31 @@ class DatabaseHelper {
   // دوال الفواتير المعلقة (Suspended Orders)
   // ==========================================================
   Future<int> saveSuspendedOrder(List<Map<String, dynamic>> cart, String note, {int discountAmount = 0, bool isDiscountPercent = false}) async {
-    final db = await instance.database;
-    int orderId = -1;
-    await db.transaction((txn) async {
-      orderId = await txn.insert('suspended_orders', {
-        'note': note.trim().isEmpty ? null : note.trim(),
-        'created_at': DateTime.now().toIso8601String(),
-        'discount_amount': discountAmount,
-        'is_discount_percent': isDiscountPercent ? 1 : 0,
-      });
-      for (final item in cart) {
-        final product = item['product'] as ProductModel;
-        await txn.insert('suspended_order_items', {
-          'order_id': orderId,
-          'product_id': product.id,
-          'quantity': item['quantity'] as int,
-          'unit_price': product.price,
+    try {
+      final db = await instance.database;
+      int orderId = -1;
+      await db.transaction((txn) async {
+        orderId = await txn.insert('suspended_orders', {
+          'note': note.trim().isEmpty ? null : note.trim(),
+          'created_at': DateTime.now().toIso8601String(),
+          'discount_amount': discountAmount,
+          'is_discount_percent': isDiscountPercent ? 1 : 0,
         });
-      }
-    });
-    return orderId;
+        for (final item in cart) {
+          final product = item['product'] as ProductModel;
+          await txn.insert('suspended_order_items', {
+            'order_id': orderId,
+            'product_id': product.id,
+            'quantity': item['quantity'] as int,
+            'unit_price': product.price,
+          });
+        }
+      });
+      return orderId;
+    } catch (e) {
+      await ErrorLogger.instance.error('فشل تعليق الفاتورة', data: {'error': '$e'});
+      return -1;
+    }
   }
 
   Future<List<Map<String, dynamic>>> getSuspendedOrders() async {
@@ -784,12 +842,14 @@ class DatabaseHelper {
     }
   }
 
-  Future<void> deleteSuspendedOrder(int orderId) async {
+  Future<bool> deleteSuspendedOrder(int orderId) async {
     try {
       final db = await instance.database;
-      await db.delete('suspended_orders', where: 'id = ?', whereArgs: [orderId]);
+      final rows = await db.delete('suspended_orders', where: 'id = ?', whereArgs: [orderId]);
+      return rows > 0;
     } catch (e) {
-      print('Error deleting suspended order: $e');
+      await ErrorLogger.instance.error('فشل حذف فاتورة معلقة', data: {'order_id': orderId, 'error': '$e'});
+      return false;
     }
   }
 

@@ -277,12 +277,25 @@ class _PosPageState extends State<PosPage> {
       ),
     );
     if (confirmed == true) {
-      await DatabaseHelper.instance.saveSuspendedOrder(
+      final orderId = await DatabaseHelper.instance.saveSuspendedOrder(
         _cart,
         noteController.text,
         discountAmount: _discountAmount,
         isDiscountPercent: _isDiscountPercent,
       );
+      // فشل الحفظ: السلة تبقى كما هي — الكاشير لا يخسر شيئاً
+      if (orderId <= 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('فشل تعليق الفاتورة! السلة محفوظة — حاول مجدداً'),
+              backgroundColor: AppTheme.errorColor,
+            ),
+          );
+        }
+        _keepFocus();
+        return;
+      }
       setState(() {
         _cart.clear();
         _discountAmount = 0;
@@ -707,8 +720,15 @@ class _PosPageState extends State<PosPage> {
           _isDiscountPercent = false;
         });
 
+        // الطباعة منفصلة عن البيع — فشلها لا يعني فشل البيع
+        var printFailed = false;
         if (shouldPrint) {
-          await _printInvoice(cartSnapshot, subtotal, discountVal, total, given, changeAmount);
+          try {
+            await _printInvoice(cartSnapshot, subtotal, discountVal, total, given, changeAmount);
+          } catch (e, st) {
+            printFailed = true;
+            await ErrorLogger.instance.logError(e, st, context: 'طباعة بعد بيع ناجح');
+          }
         }
 
         if (mounted) {
@@ -726,9 +746,14 @@ class _PosPageState extends State<PosPage> {
                   Text('تم البيع بنجاح ✓${changeAmount > 0 ? '  |  الباقي: $changeAmount د' : ''}'),
                   const SizedBox(height: 4),
                   Text('المتبقي: $remainingStock', style: const TextStyle(fontSize: 12)),
+                  if (printFailed) ...[
+                    const SizedBox(height: 4),
+                    const Text('⚠️ فشلت الطباعة — البيانات محفوظة، أعد الطباعة من الزر العلوي',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ],
                 ],
               ),
-              backgroundColor: AppTheme.successColor,
+              backgroundColor: printFailed ? AppTheme.warningColor : AppTheme.successColor,
               duration: const Duration(seconds: 4),
             ),
           );
@@ -1255,8 +1280,10 @@ class _PosPageState extends State<PosPage> {
                                     final discountInfo = await DatabaseHelper
                                         .instance
                                         .getSuspendedOrderDiscount(orderId);
-                                    await DatabaseHelper.instance
-                                        .deleteSuspendedOrder(orderId);
+
+                                    // ─── السلة أولاً ثم الحذف ───
+                                    // لو انقطع التطبيق بعد الإضافة وقبل الحذف:
+                                    // الفاتورة تبقى معلقة (تكرار محتمل أفضل من ضياع)
                                     if (ctx.mounted) Navigator.pop(ctx);
                                     setState(() {
                                       _cart.addAll(suspendedCart);
@@ -1267,6 +1294,15 @@ class _PosPageState extends State<PosPage> {
                                               0) ==
                                           1;
                                     });
+
+                                    final deleted = await DatabaseHelper.instance
+                                        .deleteSuspendedOrder(orderId);
+                                    if (!deleted) {
+                                      await ErrorLogger.instance.warning(
+                                        'استؤنفت فاتورة لكن فشل حذفها المعلق — قد تتكرر',
+                                        data: {'order_id': orderId},
+                                      );
+                                    }
                                     if (missingCount > 0 && mounted) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
@@ -1584,10 +1620,24 @@ class _PosPageState extends State<PosPage> {
           if (_lastPrintCart != null)
             IconButton(
               icon: const Icon(Icons.receipt_long),
-              onPressed: () => _printInvoice(
-                _lastPrintCart!, _lastPrintSubtotal, _lastPrintDiscount,
-                _lastPrintTotal, _lastPrintGiven, _lastPrintChange,
-              ),
+              onPressed: () async {
+                try {
+                  await _printInvoice(
+                    _lastPrintCart!, _lastPrintSubtotal, _lastPrintDiscount,
+                    _lastPrintTotal, _lastPrintGiven, _lastPrintChange,
+                  );
+                } catch (e, st) {
+                  await ErrorLogger.instance.logError(e, st, context: 'إعادة طباعة آخر فاتورة');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('فشلت الطباعة — تأكد من الطابعة: $e'),
+                        backgroundColor: AppTheme.errorColor,
+                      ),
+                    );
+                  }
+                }
+              },
               tooltip: 'طباعة آخر فاتورة',
             ),
           IconButton(

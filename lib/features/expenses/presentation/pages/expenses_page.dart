@@ -294,10 +294,13 @@ class _ExpensesPageState extends State<ExpensesPage> {
       ),
     );
     if (confirmed == true) {
-      await DatabaseHelper.instance.deleteExpense(expense['id'] as int);
+      final ok = await DatabaseHelper.instance.deleteExpense(expense['id'] as int);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حذف المصروف'), backgroundColor: AppTheme.successColor),
+          SnackBar(
+            content: Text(ok ? 'تم حذف المصروف' : 'فشل الحذف — حاول مجدداً'),
+            backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
+          ),
         );
       }
     }

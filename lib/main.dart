@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, PlatformDispatcher;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:io' show Platform;
 import 'core/theme/app_theme.dart';
@@ -10,6 +10,22 @@ import 'core/services/error_logger.dart';
 void main() async {
   // التأكد من تهيئة الفلتر قبل تشغيل أي كود برمجي
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ─── شبكة أمان عامة: لا خطأ يضيع بدون تسجيل ───
+  // أخطاء إطار Flutter (build/layout) — نعرضها أيضاً بالكونسول للتطوير
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    ErrorLogger.instance.logError(
+      details.exception,
+      details.stack,
+      context: 'إطار Flutter: ${details.library}',
+    );
+  };
+  // أخطاء غير ملتقطة في الـ zones والمنصة
+  PlatformDispatcher.instance.onError = (e, st) {
+    ErrorLogger.instance.logError(e, st, context: 'خطأ غير ملتقط');
+    return true; // نمنع انهيار التطبيق — نسجل فقط
+  };
 
   // على الديسكتوب نستخدم FFI عشان يشتغل sqflite — على الموبايل ما نحتاجه
   if (!kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
