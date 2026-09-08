@@ -1,5 +1,5 @@
 ﻿import 'package:flutter/material.dart';
-import 'package:lamsa/core/services/error_logger.dart';
+import 'package:cashier_system/core/services/error_logger.dart';
 
 class ErrorBoundary extends StatefulWidget {
   final Widget child;

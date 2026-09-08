@@ -1,7 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:lamsa/core/database/database_helper.dart';
-import 'package:lamsa/core/theme/app_theme.dart';
+import 'package:cashier_system/core/database/database_helper.dart';
+import 'package:cashier_system/core/theme/app_theme.dart';
 
 /// رسم بياني أعمدة — مبيعات وأرباح آخر [days] يوم
 class WeeklySalesChart extends StatefulWidget {

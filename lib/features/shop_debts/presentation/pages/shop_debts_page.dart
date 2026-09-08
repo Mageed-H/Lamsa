@@ -5,8 +5,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:lamsa/core/database/database_helper.dart';
-import 'package:lamsa/core/theme/app_theme.dart';
+import 'package:cashier_system/core/database/database_helper.dart';
+import 'package:cashier_system/core/theme/app_theme.dart';
 
 class ShopDebtsPage extends StatefulWidget {
   const ShopDebtsPage({Key? key}) : super(key: key);

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:lamsa/core/services/pin_hash.dart';
+import 'package:cashier_system/core/services/pin_hash.dart';
 
 void main() {
   group('PinHash', () {

@@ -155,6 +155,9 @@ class _MainLayoutState extends State<MainLayout> {
     }
 
     setState(() => _currentIndex = index);
+
+    // إعلام الصفحة الأولى (الكاشير) بظهورها أو إخفائها
+    PosPage.setPageVisible(_currentIndex == 0);
   }
 
   bool _handleKeyEvent(KeyEvent event) {

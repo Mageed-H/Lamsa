@@ -58,7 +58,7 @@ class DbEncryption {
     final appData = Platform.environment['APPDATA']
         ?? Platform.environment['HOME']
         ?? '.';
-    return p.join(appData, 'Lamsa', '.dbkey');
+    return p.join(appData, 'CashierSystem', '.dbkey');
   }
 
   /// الحصول على مفتاح التشفير — ينشئه تلقائياً عند أول تشغيل

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:lamsa/core/widgets/error_boundary.dart';
+import 'package:cashier_system/core/widgets/error_boundary.dart';
 
 void main() {
   testWidgets('ErrorBoundary يعرض الابن بشكل طبيعي عند عدم وجود خطأ', (tester) async {

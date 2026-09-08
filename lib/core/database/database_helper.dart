@@ -45,11 +45,11 @@ class DatabaseHelper {
       final appDataDir = Platform.environment['APPDATA']
           ?? Platform.environment['HOME']
           ?? '.';
-      final lamsaDir = Directory(join(appDataDir, 'Lamsa'));
-      if (!await lamsaDir.exists()) {
-        await lamsaDir.create(recursive: true);
+      final cashierDir = Directory(join(appDataDir, 'CashierSystem'));
+      if (!await cashierDir.exists()) {
+        await cashierDir.create(recursive: true);
       }
-      dbPath = lamsaDir.path;
+      dbPath = cashierDir.path;
     } else {
       dbPath = await getDatabasesPath();
     }
@@ -103,7 +103,7 @@ class DatabaseHelper {
       final appDataDir = Platform.environment['APPDATA'] 
           ?? Platform.environment['HOME'] 
           ?? '.';
-      return join(appDataDir, 'Lamsa', 'cashier_system.db');
+      return join(appDataDir, 'CashierSystem', 'cashier_system.db');
     }
     final dbPath = await getDatabasesPath();
     return join(dbPath, 'cashier_system.db');
@@ -113,16 +113,16 @@ class DatabaseHelper {
     if (Platform.isWindows) {
       // محاولة استخدام D:\ أولاً، ثم مجلد المستخدم
       final dDrive = Directory(r'D:\');
-      if (dDrive.existsSync()) return r'D:\.lamsa_backup';
+      if (dDrive.existsSync()) return r'D:\.cashier_backup';
     }
     final home = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '.';
-    return '$home${Platform.pathSeparator}.lamsa_backup';
+    return '$home${Platform.pathSeparator}.cashier_backup';
   }
 
   /// نسخ احتياطي لقاعدة البيانات في مجلد مخفي
   ///
   /// بعد النسخ يتم التحقق من سلامة النسخة تلقائياً — إذا فشل التحقق تُحذف النسخة ويرمى خطأ.
-  Future<String> backupDatabase({String prefix = 'lamsa_backup_'}) async {
+  Future<String> backupDatabase({String prefix = 'cashier_backup_'}) async {
     final srcPath = await getDbFilePath();
     final srcFile = File(srcPath);
     if (!await srcFile.exists()) throw Exception('ملف قاعدة البيانات غير موجود');
@@ -854,6 +854,81 @@ class DatabaseHelper {
   }
 
   // ==========================================================
+  // الحفظ التلقائي للسلة (Draft)
+  // ==========================================================
+
+  /// حفظ السلة الحالية كمسودة تلقائية (بدون مطالبة المستخدم)
+  Future<void> saveAutoDraft(List<Map<String, dynamic>> cart, {int discountAmount = 0, bool isDiscountPercent = false}) async {
+    if (cart.isEmpty) return;
+    try {
+      final db = await instance.database;
+      // حذف المسودة التلقائية القديمة
+      await db.delete('suspended_orders', where: 'note = ?', whereArgs: ['__auto_draft__']);
+      // حفظ مسودة جديدة
+      await db.transaction((txn) async {
+        final orderId = await txn.insert('suspended_orders', {
+          'note': '__auto_draft__',
+          'created_at': DateTime.now().toIso8601String(),
+          'discount_amount': discountAmount,
+          'is_discount_percent': isDiscountPercent ? 1 : 0,
+        });
+        for (final item in cart) {
+          final product = item['product'] as ProductModel;
+          await txn.insert('suspended_order_items', {
+            'order_id': orderId,
+            'product_id': product.id,
+            'quantity': item['quantity'] as int,
+            'unit_price': product.price,
+          });
+        }
+      });
+    } catch (_) {}
+  }
+
+  /// استرجاع المسودة التلقائية (إذا وُجدت)
+  Future<Map<String, dynamic>?> loadAutoDraft() async {
+    try {
+      final db = await instance.database;
+      final orders = await db.query('suspended_orders', where: 'note = ?', whereArgs: ['__auto_draft__'], limit: 1);
+      if (orders.isEmpty) return null;
+      final orderId = orders.first['id'] as int;
+      final items = await db.query('suspended_order_items', where: 'order_id = ?', whereArgs: [orderId]);
+      final List<Map<String, dynamic>> cart = [];
+      for (final item in items) {
+        final productId = item['product_id'] as int;
+        final quantity = item['quantity'] as int;
+        final unitPrice = item['unit_price'] as int;
+        final productMaps = await db.query('products', where: 'id = ?', whereArgs: [productId]);
+        if (productMaps.isNotEmpty) {
+          final product = ProductModel.fromMap(productMaps.first).copyWith(price: unitPrice);
+          cart.add({'product': product, 'quantity': quantity});
+        }
+      }
+      if (cart.isEmpty) {
+        await db.delete('suspended_orders', where: 'id = ?', whereArgs: [orderId]);
+        return null;
+      }
+      return {
+        'cart': cart,
+        'discount_amount': orders.first['discount_amount'] as int? ?? 0,
+        'is_discount_percent': (orders.first['is_discount_percent'] as int? ?? 0) == 1,
+        'order_id': orderId,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// حذف المسودة التلقائية بعد استرجاعها
+  Future<void> clearAutoDraft(int orderId) async {
+    try {
+      final db = await instance.database;
+      await db.delete('suspended_order_items', where: 'order_id = ?', whereArgs: [orderId]);
+      await db.delete('suspended_orders', where: 'id = ?', whereArgs: [orderId]);
+    } catch (_) {}
+  }
+
+  // ==========================================================
   // جداول المبيعات (v5)
   // ==========================================================
   Future _createV5Tables(Database db) async {
@@ -1267,6 +1342,22 @@ class DatabaseHelper {
         orderBy: 'created_at DESC',
         limit: 50,
       );
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// سجل تصحيحات الجرد لجميع المنتجات (الأحدث أولاً)
+  Future<List<Map<String, dynamic>>> getAllAdjustments() async {
+    try {
+      final db = await instance.database;
+      return await db.rawQuery('''
+        SELECT sa.*, p.name as product_name
+        FROM stock_adjustments sa
+        LEFT JOIN products p ON sa.product_id = p.id
+        ORDER BY sa.created_at DESC
+        LIMIT 100
+      ''');
     } catch (_) {
       return [];
     }

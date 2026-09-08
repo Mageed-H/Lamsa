@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:lamsa/core/security/db_encryption.dart';
+import 'package:cashier_system/core/security/db_encryption.dart';
 
 void main() {
   group('DbEncryption', () {
@@ -18,7 +18,7 @@ void main() {
     });
 
     test('isPlaintextDb يتعرف على ملف SQLite نصي', () async {
-      final tmp = await Directory.systemTemp.createTemp('lamsa_test');
+      final tmp = await Directory.systemTemp.createTemp('cashier_test');
       final dbFile = File('${tmp.path}${Platform.pathSeparator}plain.db');
       // ترويسة SQLite الحقيقية
       await dbFile.writeAsBytes('SQLite format 3\x00'.codeUnits);
@@ -29,7 +29,7 @@ void main() {
     });
 
     test('isPlaintextDb يتعرف على ملف مشفر (ترويسة عشوائية)', () async {
-      final tmp = await Directory.systemTemp.createTemp('lamsa_test');
+      final tmp = await Directory.systemTemp.createTemp('cashier_test');
       final dbFile = File('${tmp.path}${Platform.pathSeparator}enc.db');
       await dbFile.writeAsBytes(List.generate(64, (i) => i * 7 % 256));
 

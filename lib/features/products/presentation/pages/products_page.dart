@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:lamsa/core/database/database_helper.dart';
-import 'package:lamsa/core/theme/app_theme.dart';
-import 'package:lamsa/core/widgets/custom_button.dart';
-import 'package:lamsa/core/widgets/custom_text_field.dart';
-import 'package:lamsa/features/products/data/models/product_model.dart';
-import 'package:lamsa/features/products/presentation/widgets/barcode_printer_widget.dart';
+import 'package:cashier_system/core/database/database_helper.dart';
+import 'package:cashier_system/core/theme/app_theme.dart';
+import 'package:cashier_system/core/widgets/custom_button.dart';
+import 'package:cashier_system/core/widgets/custom_text_field.dart';
+import 'package:cashier_system/features/products/data/models/product_model.dart';
+import 'package:cashier_system/features/products/presentation/widgets/barcode_printer_widget.dart';
 
 class ProductsPage extends StatefulWidget {
   const ProductsPage({Key? key}) : super(key: key);
@@ -26,6 +26,15 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   final _stockController = TextEditingController();
   final _barcodeController = TextEditingController();
 
+  // Focus nodes للتنقل بالإنتر
+  final _nameFocusNode = FocusNode();
+  final _colorFocusNode = FocusNode();
+  final _sizeFocusNode = FocusNode();
+  final _purchasePriceFocusNode = FocusNode();
+  final _priceFocusNode = FocusNode();
+  final _stockFocusNode = FocusNode();
+  final _barcodeFocusNode = FocusNode();
+
   // متغيرات الأقسام (Categories)
   List<String> _categories = [];
   String? _selectedCategory;
@@ -35,14 +44,23 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   List<ProductModel> _allProducts = [];
   bool _isLoadingProducts = false;
 
-  // فوكس نود لحقل الباركود في تبويب الإضافة
-  final _barcodeFocusNode = FocusNode();
+  // بيانات آخر منتج تم حفظه (لاسترجاعه)
+  String _lastName = '';
+  String _lastCategory = '';
+  int _lastPurchasePrice = 0;
+  int _lastPrice = 0;
+
+  // باركودات متعددة أثناء الإضافة
+  final List<String> _extraBarcodes = [];
 
   // سكانر تبويب القائمة
   final _listScanController = TextEditingController();
   final _listScanFocusNode = FocusNode();
   final _listScrollController = ScrollController();
   int? _highlightedProductIndex;
+
+  // بحث القائمة
+  String _listSearchQuery = '';
 
   @override
   void initState() {
@@ -80,6 +98,12 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
     _purchasePriceController.dispose();
     _stockController.dispose();
     _barcodeController.dispose();
+    _nameFocusNode.dispose();
+    _colorFocusNode.dispose();
+    _sizeFocusNode.dispose();
+    _purchasePriceFocusNode.dispose();
+    _priceFocusNode.dispose();
+    _stockFocusNode.dispose();
     _barcodeFocusNode.dispose();
     _listScanController.dispose();
     _listScanFocusNode.dispose();
@@ -167,6 +191,19 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
         return;
       }
 
+      // تحقق: سعر البيع أكبر من سعر الشراء
+      final sellPrice = int.tryParse(_priceController.text.trim()) ?? 0;
+      final buyPrice = int.tryParse(_purchasePriceController.text.trim()) ?? 0;
+      if (sellPrice <= buyPrice) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('سعر البيع يجب أن يكون أكبر من سعر الشراء!'),
+            backgroundColor: AppTheme.errorColor,
+          ));
+        }
+        return;
+      }
+
       // التحقق من تكرار الباركود قبل الحفظ
       final barcode = _barcodeController.text.trim();
       if (barcode.isNotEmpty) {
@@ -188,8 +225,8 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
         category: _selectedCategory!,
         color: _colorController.text.trim(),
         size: _sizeController.text.trim(),
-        price: int.tryParse(_priceController.text.trim()) ?? 0,
-        purchasePrice: int.tryParse(_purchasePriceController.text.trim()) ?? 0,
+        price: sellPrice,
+        purchasePrice: buyPrice,
         stock: int.tryParse(_stockController.text.trim()) ?? 0,
         barcode: _barcodeController.text.trim(),
         isCustomBarcode: _isCustomBarcode,
@@ -198,20 +235,117 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
       final result = await DatabaseHelper.instance.insertProduct(newProduct);
 
       if (result != -1) {
+        // حفظ بيانات آخر منتج (لاسترجاعه لاحقاً)
+        _lastName = _nameController.text.trim();
+        _lastCategory = _selectedCategory!;
+        _lastPurchasePrice = buyPrice;
+        _lastPrice = sellPrice;
+
+        // حفظ الباركودات الإضافية
+        if (result > 0 && _extraBarcodes.isNotEmpty) {
+          for (final extraBarcode in _extraBarcodes) {
+            await DatabaseHelper.instance.addBarcode(result, extraBarcode);
+          }
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ المنتج بنجاح!'), backgroundColor: AppTheme.successColor));
+        // مسح جميع الحقول
         _nameController.clear();
         _colorController.clear();
         _sizeController.clear();
-        _priceController.clear();
         _purchasePriceController.clear();
+        _priceController.clear();
         _stockController.clear();
         _barcodeController.clear();
-        setState(() => _isCustomBarcode = false);
+        setState(() {
+          _isCustomBarcode = false;
+          _extraBarcodes.clear();
+        });
         _loadAllProducts();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('حدث خطأ أثناء الحفظ!'), backgroundColor: AppTheme.errorColor));
       }
     }
+  }
+
+  // استرجاع بيانات آخر منتج
+  void _restoreLastProduct() {
+    if (_lastName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('لا يوجد منتج سابق للاسترجاع'),
+        backgroundColor: AppTheme.warningColor,
+      ));
+      return;
+    }
+    setState(() {
+      _nameController.text = _lastName;
+      _selectedCategory = _lastCategory;
+      _purchasePriceController.text = _lastPurchasePrice > 0 ? _lastPurchasePrice.toString() : '';
+      _priceController.text = _lastPrice > 0 ? _lastPrice.toString() : '';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('تم استرجاع بيانات "$_lastName"'),
+      backgroundColor: AppTheme.successColor,
+    ));
+  }
+
+  // إضافة باركود إضافي أثناء إضافة منتج جديد
+  Future<void> _addExtraBarcode() async {
+    final ctrl = TextEditingController();
+    final rawBarcode = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('إضافة باركود إضافي', style: TextStyle(color: AppTheme.primaryColor)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'امسح أو أدخل الباركود',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.qr_code),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('إضافة'),
+          ),
+        ],
+      ),
+    );
+    final barcode = rawBarcode?.trim().replaceAll(RegExp(r'[^a-zA-Z0-9\-]'), '');
+    if (barcode == null || barcode.isEmpty) return;
+
+    // التحقق من عدم التكرار
+    if (_barcodeController.text.trim() == barcode || _extraBarcodes.contains(barcode)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('هذا الباركود مضاف مسبقاً!'),
+          backgroundColor: AppTheme.warningColor,
+        ));
+      }
+      return;
+    }
+
+    final exists = await DatabaseHelper.instance.barcodeExists(barcode);
+    if (exists) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('هذا الباركود مستخدم مسبقاً في منتج آخر!'),
+          backgroundColor: AppTheme.errorColor,
+        ));
+      }
+      return;
+    }
+
+    setState(() => _extraBarcodes.add(barcode));
+  }
+
+  void _removeExtraBarcode(String barcode) {
+    setState(() => _extraBarcodes.remove(barcode));
   }
 
   // ─── مدققو الحقول الرقمية — يرفضون الحروف والأرقام العربية والسالب ───
@@ -238,27 +372,6 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   // تنظيف مدخلات الماسح الضوئي من الرموز الزائدة
   String _cleanBarcode(String raw) {
     return raw.trim().replaceAll(RegExp(r'[^a-zA-Z0-9\-]'), '');
-  }
-
-  // عند مسح باركود في تبويب إضافة منتج → يبقى النص في الحقل ويظهر تأكيد
-  void _onAddProductScan(String barcode) {
-    final cleanBarcode = _cleanBarcode(barcode);
-    if (cleanBarcode.isEmpty) {
-      _barcodeFocusNode.requestFocus();
-      return;
-    }
-    setState(() {
-      _barcodeController.text = cleanBarcode;
-      _isCustomBarcode = false;
-    });
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('تم قراءة الباركود: $cleanBarcode'),
-        backgroundColor: AppTheme.successColor,
-        duration: const Duration(seconds: 2),
-      ));
-    }
-    _barcodeFocusNode.requestFocus();
   }
 
   // عند مسح باركود في تبويب القائمة → يتنقل للمنتج ويلوّنه
@@ -329,6 +442,77 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
             child: const Text('حذف'),
           ),
         ],
+      ),
+    );
+  }
+
+  // تكرار منتج كـ variant جديد (same name, category, prices — clear color/size/barcode)
+  void _duplicateAsVariant(ProductModel product) {
+    _tabController.animateTo(0); // الانتقال لتبويب الإضافة
+    setState(() {
+      _nameController.text = product.name;
+      _selectedCategory = product.category;
+      _purchasePriceController.text = product.purchasePrice.toString();
+      _priceController.text = product.price.toString();
+      _colorController.clear();
+      _sizeController.clear();
+      _stockController.clear();
+      _barcodeController.clear();
+      _extraBarcodes.clear();
+      _isCustomBarcode = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('تم نسخ "${product.name}" — أضف لون/قياس وباركود جديد'),
+      backgroundColor: AppTheme.successColor,
+    ));
+  }
+
+  // سجل التعديلات العالمي لجميع المنتجات
+  Future<void> _showGlobalAdjustmentHistory() async {
+    final adjustments = await DatabaseHelper.instance.getAllAdjustments();
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (ctx, scrollController) => ListView(
+          controller: scrollController,
+          padding: const EdgeInsets.all(16),
+          children: [
+            const Center(child: Text('سجل التعديلات العالمي', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.primaryColor))),
+            const SizedBox(height: 12),
+            if (adjustments.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: Text('لا توجد تعديلات مسجلة', style: TextStyle(color: AppTheme.textSecondary))),
+              )
+            else
+              ...adjustments.map((a) {
+                final diff = a['difference'] as int? ?? 0;
+                final productName = a['product_name'] as String? ?? 'منتج محذوف';
+                return ListTile(
+                  leading: Icon(
+                    diff > 0 ? Icons.add_circle : Icons.remove_circle,
+                    color: diff > 0 ? AppTheme.successColor : AppTheme.errorColor,
+                  ),
+                  title: Text(productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  subtitle: Text(
+                    '${a['old_stock']} ← ${a['new_stock']} (${a['reason']})',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  trailing: Text(
+                    (a['created_at'] as String).substring(0, 16).replaceAll('T', ' '),
+                    style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                  ),
+                );
+              }),
+          ],
+        ),
       ),
     );
   }
@@ -412,13 +596,30 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
               label: 'اسم المنتج (مثال: عطر جادور)',
               controller: _nameController,
               icon: Icons.shopping_bag,
+              focusNode: _nameFocusNode,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) => _colorFocusNode.requestFocus(),
               validator: (val) => val == null || val.trim().isEmpty ? 'يرجى إدخال اسم المنتج' : null,
             ),
             Row(
               children: [
-                Expanded(child: CustomTextField(label: 'اللون (اختياري)', controller: _colorController, icon: Icons.color_lens)),
+                Expanded(child: CustomTextField(
+                  label: 'اللون (اختياري)',
+                  controller: _colorController,
+                  icon: Icons.color_lens,
+                  focusNode: _colorFocusNode,
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _sizeFocusNode.requestFocus(),
+                )),
                 const SizedBox(width: 16),
-                Expanded(child: CustomTextField(label: 'القياس (اختياري)', controller: _sizeController, icon: Icons.straighten)),
+                Expanded(child: CustomTextField(
+                  label: 'القياس (اختياري)',
+                  controller: _sizeController,
+                  icon: Icons.straighten,
+                  focusNode: _sizeFocusNode,
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _purchasePriceFocusNode.requestFocus(),
+                )),
               ],
             ),
 
@@ -435,6 +636,9 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                     controller: _purchasePriceController,
                     keyboardType: TextInputType.number,
                     icon: Icons.trending_down,
+                    focusNode: _purchasePriceFocusNode,
+                    textInputAction: TextInputAction.next,
+                    onSubmitted: (_) => _priceFocusNode.requestFocus(),
                     validator: _validatePositiveInt,
                   ),
                 ),
@@ -445,6 +649,9 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                     controller: _priceController,
                     keyboardType: TextInputType.number,
                     icon: Icons.trending_up,
+                    focusNode: _priceFocusNode,
+                    textInputAction: TextInputAction.next,
+                    onSubmitted: (_) => _stockFocusNode.requestFocus(),
                     validator: _validatePositiveInt,
                   ),
                 ),
@@ -455,6 +662,9 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
               controller: _stockController,
               keyboardType: TextInputType.number,
               icon: Icons.inventory,
+              focusNode: _stockFocusNode,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) => _barcodeFocusNode.requestFocus(),
               validator: _validateNonNegativeInt,
             ),
             const Divider(height: 32, thickness: 1),
@@ -471,7 +681,8 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                     controller: _barcodeController,
                     icon: Icons.qr_code,
                     focusNode: _barcodeFocusNode,
-                    onSubmitted: _onAddProductScan,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _saveProduct(),
                     validator: (val) => val == null || val.isEmpty ? 'يرجى مسح أو توليد باركود' : null,
                   ),
                 ),
@@ -492,13 +703,59 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                 ),
               ],
             ),
+
+            // 4.1 باركودات إضافية
+            if (_extraBarcodes.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: _extraBarcodes.map((b) => Chip(
+                  label: Text(b, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+                  deleteIcon: const Icon(Icons.close, size: 16),
+                  onDeleted: () => _removeExtraBarcode(b),
+                  backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.1),
+                  side: BorderSide(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
+                )).toList(),
+              ),
+            ],
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _addExtraBarcode,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('إضافة باركود إضافي'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryColor),
+            ),
+
             const SizedBox(height: 32),
 
-            // 5. زر الحفظ
-            CustomButton(
-              text: 'حفظ المنتج في المخزن',
-              icon: Icons.save,
-              onPressed: _saveProduct,
+            // 5. أزرار الحفظ والاسترجاع
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: CustomButton(
+                    text: 'حفظ المنتج في المخزن',
+                    icon: Icons.save,
+                    onPressed: _saveProduct,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 1,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.secondaryColor,
+                      foregroundColor: AppTheme.textPrimary,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.restore, size: 18),
+                    label: const Text('استرجاع', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    onPressed: _restoreLastProduct,
+                  ),
+                ),
+              ],
             ),
                         ],
                       ),
@@ -514,21 +771,43 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   }
 
   Widget _buildProductsListTab() {
+    // بحث ذكي بالاسم واللون والقياس
+    List<ProductModel> filteredProducts = _allProducts;
+    if (_listSearchQuery.isNotEmpty) {
+      final query = _listSearchQuery.toLowerCase();
+      final words = query.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+      if (words.isNotEmpty) {
+        filteredProducts = _allProducts.where((p) {
+          final name = p.name.toLowerCase();
+          final color = p.color.toLowerCase();
+          final size = p.size.toLowerCase();
+          final barcode = p.barcode.toLowerCase();
+          return words.every((word) =>
+            name.contains(word) ||
+            color.contains(word) ||
+            size.contains(word) ||
+            barcode.contains(word)
+          );
+        }).toList();
+      }
+    }
+
     return Column(
       children: [
-        // حقل استقبال السكانر (بحث وتحديد في القائمة)
+        // حقل البحث الذكي
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: TextField(
             controller: _listScanController,
             focusNode: _listScanFocusNode,
             decoration: InputDecoration(
-              labelText: 'امسح الباركود للبحث والتحديد في القائمة',
+              labelText: 'بحث بالاسم أو اللون أو القياس أو الباركود',
               prefixIcon: const Icon(Icons.search, color: AppTheme.primaryColor),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               filled: true,
               fillColor: AppTheme.searchFieldColor,
             ),
+            onChanged: (val) => setState(() => _listSearchQuery = val),
             onSubmitted: _onProductsListScan,
           ),
         ),
@@ -537,12 +816,21 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('${_allProducts.length} منتج في المخزن',
+              Text('${filteredProducts.length} منتج في المخزن',
                   style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.bold)),
-              IconButton(
-                icon: const Icon(Icons.refresh, color: AppTheme.primaryColor),
-                onPressed: _loadAllProducts,
-                tooltip: 'تحديث',
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.history, color: AppTheme.warningColor),
+                    onPressed: _showGlobalAdjustmentHistory,
+                    tooltip: 'سجل التعديلات العالمي',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, color: AppTheme.primaryColor),
+                    onPressed: _loadAllProducts,
+                    tooltip: 'تحديث',
+                  ),
+                ],
               ),
             ],
           ),
@@ -558,12 +846,20 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                         style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
                       ),
                     )
-                  : ListView.builder(
+                  : filteredProducts.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'لا توجد نتائج مطابقة للبحث.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+                          ),
+                        )
+                      : ListView.builder(
                       controller: _listScrollController,
                       itemExtent: 96.0,
-                      itemCount: _allProducts.length,
+                      itemCount: filteredProducts.length,
                       itemBuilder: (context, index) {
-                        final p = _allProducts[index];
+                        final p = filteredProducts[index];
                         final profit = p.price - p.purchasePrice;
                         final isHighlighted = _highlightedProductIndex == index;
                         return Card(
@@ -598,6 +894,11 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                IconButton(
+                                  icon: const Icon(Icons.copy, color: AppTheme.primaryColor),
+                                  onPressed: () => _duplicateAsVariant(p),
+                                  tooltip: 'تكرار كـ variant',
+                                ),
                                 IconButton(
                                   icon: Icon(Icons.print, color: p.barcode.isNotEmpty ? AppTheme.successColor : AppTheme.neutralColor),
                                   onPressed: p.barcode.isNotEmpty
@@ -801,6 +1102,9 @@ class _EditProductDialogState extends State<_EditProductDialog> {
   List<Map<String, dynamic>> _barcodes = [];
   bool _barcodesLoading = true;
 
+  String? _selectedCategory;
+  List<String> _categories = [];
+
   @override
   void initState() {
     super.initState();
@@ -810,7 +1114,9 @@ class _EditProductDialogState extends State<_EditProductDialog> {
     _priceCtrl = TextEditingController(text: widget.product.price.toString());
     _purchasePriceCtrl = TextEditingController(text: widget.product.purchasePrice.toString());
     _stockCtrl = TextEditingController(text: widget.product.stock.toString());
+    _selectedCategory = widget.product.category;
     _loadBarcodes();
+    _loadCategories();
   }
 
   @override
@@ -822,6 +1128,11 @@ class _EditProductDialogState extends State<_EditProductDialog> {
     _purchasePriceCtrl.dispose();
     _stockCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadCategories() async {
+    final categories = await DatabaseHelper.instance.getAllCategories();
+    if (mounted) setState(() => _categories = categories);
   }
 
   Future<void> _loadBarcodes() async {
@@ -948,6 +1259,14 @@ class _EditProductDialogState extends State<_EditProductDialog> {
               TextField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(labelText: 'الاسم', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 8),
+              // قائمة منسدلة للقسم
+              DropdownButtonFormField<String>(
+                value: _selectedCategory,
+                decoration: const InputDecoration(labelText: 'القسم', border: OutlineInputBorder()),
+                items: _categories.map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
+                onChanged: (val) => setState(() => _selectedCategory = val),
               ),
               const SizedBox(height: 8),
               Row(children: [
@@ -1101,6 +1420,7 @@ class _EditProductDialogState extends State<_EditProductDialog> {
 
             final updated = widget.product.copyWith(
               name: name,
+              category: _selectedCategory ?? widget.product.category,
               color: _colorCtrl.text.trim(),
               size: _sizeCtrl.text.trim(),
               price: price,

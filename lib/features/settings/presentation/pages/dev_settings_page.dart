@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:barcode/barcode.dart' as bc;
-import 'package:lamsa/core/database/database_helper.dart';
-import 'package:lamsa/core/theme/app_theme.dart';
-import 'package:lamsa/core/services/error_logger.dart';
-import 'package:lamsa/core/services/pin_hash.dart';
-import 'package:lamsa/features/z_report/presentation/pages/z_report_page.dart';
+import 'package:cashier_system/core/database/database_helper.dart';
+import 'package:cashier_system/core/theme/app_theme.dart';
+import 'package:cashier_system/core/services/error_logger.dart';
+import 'package:cashier_system/core/services/pin_hash.dart';
+import 'package:cashier_system/features/z_report/presentation/pages/z_report_page.dart';
 
 /// صفحة إعدادات المطور — لا تظهر في القائمة الرئيسية
 /// يُفتح عبر: Ctrl + Alt + Shift ثم اكتب  d e v m h

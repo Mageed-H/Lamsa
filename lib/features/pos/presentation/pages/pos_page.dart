@@ -7,19 +7,30 @@ import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:lamsa/core/database/database_helper.dart';
-import 'package:lamsa/core/theme/app_theme.dart';
-import 'package:lamsa/features/products/data/models/product_model.dart';
-import 'package:lamsa/core/services/error_logger.dart';
+import 'package:cashier_system/core/database/database_helper.dart';
+import 'package:cashier_system/core/theme/app_theme.dart';
+import 'package:cashier_system/features/products/data/models/product_model.dart';
+import 'package:cashier_system/core/services/error_logger.dart';
 
 class PosPage extends StatefulWidget {
   const PosPage({Key? key}) : super(key: key);
+
+  /// تحديث حالة ظهور الصفحة — يُستدعى من MainLayout عند تبديل التبويب
+  static void setPageVisible(bool visible) {
+    _PosPageState.instance?.setPageVisible(visible);
+  }
 
   @override
   State<PosPage> createState() => _PosPageState();
 }
 
 class _PosPageState extends State<PosPage> {
+  // static instance للوصول من مستمع دورة الحياة
+  static _PosPageState? instance;
+
+  // هل الصفحة ظاهرة حالياً؟ (يُحدّث من MainLayout عند تبديل التبويب)
+  bool _isPageVisible = true;
+
   // للتحكم بحقل الباركود وبقاء التركيز (Focus) عليه دائماً
   final TextEditingController _barcodeController = TextEditingController();
   final FocusNode _barcodeFocusNode = FocusNode();
@@ -43,29 +54,42 @@ class _PosPageState extends State<PosPage> {
   int _lastPrintChange = 0;
   // تصفية المنتجات
   String? _posSelectedCategory;
+  // بحث بالاسم/اللون/القياس
+  String _posSearchQuery = '';
+  // معرّف المسودة التلقائية الحالية
+  int? _autoDraftOrderId;
 
   @override
   void initState() {
     super.initState();
+    instance = this;
     DatabaseHelper.productsRevision.addListener(_loadAllProducts);
     // مستمع يرجع التركيز تلقائياً لحقل الباركود كل ما يضيع
     _barcodeFocusNode.addListener(_autoRefocus);
+    // مراقب دورة حياة التطبيق — يحفظ السلة تلقائياً عند الخروج
+    WidgetsBinding.instance.addObserver(_lifecycleObserver);
     // أول ما تفتح الشاشة، نخلي التركيز تلقائياً على حقل الباركود
     WidgetsBinding.instance.addPostFrameCallback((_) {
       FocusScope.of(context).requestFocus(_barcodeFocusNode);
       _checkSuspendedOrders();
       _loadAllProducts();
+      _restoreAutoDraft();
     });
   }
 
   @override
   void dispose() {
+    instance = null;
+    WidgetsBinding.instance.removeObserver(_lifecycleObserver);
     DatabaseHelper.productsRevision.removeListener(_loadAllProducts);
     _barcodeFocusNode.removeListener(_autoRefocus);
     _barcodeController.dispose();
     _barcodeFocusNode.dispose();
     super.dispose();
   }
+
+  // مراقب دورة حياة التطبيق — يحفظ السلة عند الخروج للخلفية
+  final _lifecycleObserver = _PosLifecycleObserver();
 
   // تنظيف مدخلات الماسح الضوئي من الرموز الزائدة (مثل {#\ اللي تطلع من تبديل أنماط Code128)
   String _cleanBarcode(String raw) {
@@ -178,7 +202,70 @@ class _PosPageState extends State<PosPage> {
 
   // دالة مساعدة للحفاظ على التركيز
   void _keepFocus() {
+    if (!_isPageVisible || !mounted) return;
     FocusScope.of(context).requestFocus(_barcodeFocusNode);
+  }
+
+  // تحديث حالة الظهور — يُستدعى من MainLayout عند تبديل التبويب
+  void setPageVisible(bool visible) {
+    _isPageVisible = visible;
+    if (!visible && mounted) {
+      // لما الصفحة تختفي، نزيل المؤشر من حقل الباركود
+      _barcodeFocusNode.unfocus();
+    }
+  }
+
+  // حفظ السلة تلقائياً عند الخروج للخلفية
+  void _saveAutoDraft() {
+    if (_cart.isNotEmpty) {
+      DatabaseHelper.instance.saveAutoDraft(
+        _cart,
+        discountAmount: _discountAmount,
+        isDiscountPercent: _isDiscountPercent,
+      );
+    }
+  }
+
+  // استرجاع المسودة التلقائية عند بدء التطبيق
+  Future<void> _restoreAutoDraft() async {
+    final draft = await DatabaseHelper.instance.loadAutoDraft();
+    if (draft == null || !mounted) return;
+    final cart = draft['cart'] as List<Map<String, dynamic>>;
+    if (cart.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('استرجاع السلة', style: TextStyle(color: AppTheme.primaryColor)),
+        content: Text('وجدنا سلة محفوظة من آخر مرة (${cart.length} صنف).\nهل تريد استرجاعها؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('لا')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('نعم، استرجاع'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() {
+        _cart.addAll(cart);
+        _discountAmount = draft['discount_amount'] as int? ?? 0;
+        _isDiscountPercent = draft['is_discount_percent'] as bool? ?? false;
+      });
+      _autoDraftOrderId = draft['order_id'] as int?;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تم استرجاع السلة (${cart.length} صنف)'), backgroundColor: AppTheme.successColor),
+      );
+    } else {
+      // حذف المسودة إذا المستخدم رفض الاسترجاع
+      final orderId = draft['order_id'] as int?;
+      if (orderId != null) {
+        await DatabaseHelper.instance.clearAutoDraft(orderId);
+      }
+    }
   }
 
   // إضافة منتج مباشرة من الكروت (بدون باركود)
@@ -210,25 +297,45 @@ class _PosPageState extends State<PosPage> {
 
   List<ProductModel> get _filteredPosProducts {
     var list = _allProducts;
+
+    // فلترة حسب القسم المحدد
     if (_posSelectedCategory != null && _posSelectedCategory!.isNotEmpty) {
       list = list.where((p) => p.category == _posSelectedCategory).toList();
     }
+
+    // فلترة ذكية بالاسم/اللون/القياس
+    if (_posSearchQuery.isNotEmpty) {
+      final query = _posSearchQuery.toLowerCase();
+      final words = query.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+      if (words.isNotEmpty) {
+        list = list.where((p) {
+          final name = p.name.toLowerCase();
+          final color = p.color.toLowerCase();
+          final size = p.size.toLowerCase();
+          return words.every((word) =>
+            name.contains(word) ||
+            color.contains(word) ||
+            size.contains(word)
+          );
+        }).toList();
+      }
+    }
+
     return list;
   }
 
   // يرجع التركيز تلقائياً لحقل الباركود بعد كل فريم إذا ضاع
   // لكن فقط إذا الصفحة هي الـ route النشط (ما يسرق الفوكس من الحوارات)
   void _autoRefocus() {
-    if (!_barcodeFocusNode.hasFocus && mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_barcodeFocusNode.hasFocus) {
-          final route = ModalRoute.of(context);
-          if (route != null && route.isCurrent) {
-            _barcodeFocusNode.requestFocus();
-          }
+    if (!_isPageVisible || !_barcodeFocusNode.hasFocus || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _isPageVisible && !_barcodeFocusNode.hasFocus) {
+        final route = ModalRoute.of(context);
+        if (route != null && route.isCurrent) {
+          _barcodeFocusNode.requestFocus();
         }
-      });
-    }
+      }
+    });
   }
 
   Future<void> _checkSuspendedOrders() async {
@@ -719,6 +826,12 @@ class _PosPageState extends State<PosPage> {
           _discountAmount = 0;
           _isDiscountPercent = false;
         });
+
+        // مسح المسودة التلقائية بعد البيع الناجح
+        if (_autoDraftOrderId != null) {
+          await DatabaseHelper.instance.clearAutoDraft(_autoDraftOrderId!);
+          _autoDraftOrderId = null;
+        }
 
         // الطباعة منفصلة عن البيع — فشلها لا يعني فشل البيع
         var printFailed = false;
@@ -1727,6 +1840,7 @@ class _PosPageState extends State<PosPage> {
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         ),
                         style: const TextStyle(fontSize: 13),
+                        onChanged: (val) => setState(() => _posSearchQuery = val),
                         onSubmitted: _onBarcodeScanned,
                       ),
                     ),
@@ -1751,6 +1865,11 @@ class _PosPageState extends State<PosPage> {
                                   _discountAmount = 0;
                                   _isDiscountPercent = false;
                                 });
+                                // مسح المسودة التلقائية
+                                if (_autoDraftOrderId != null) {
+                                  DatabaseHelper.instance.clearAutoDraft(_autoDraftOrderId!);
+                                  _autoDraftOrderId = null;
+                                }
                               },
                               child: const Text('مسح الكل', style: TextStyle(color: AppTheme.errorColor, fontSize: 12)),
                             ),
@@ -1906,36 +2025,36 @@ class _PosPageState extends State<PosPage> {
               flex: 2,
               child: Column(
                 children: [
-                  // فلتر الأقسام فقط
+                  // فلتر الأقسام
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     color: AppTheme.surfaceColor,
                     child: SizedBox(
                       height: 36,
                       child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: categories.length,
-                            separatorBuilder: (_, _) => const SizedBox(width: 6),
-                            itemBuilder: (ctx, i) {
-                              final cat = categories[i];
-                              final selected = (i == 0 && _posSelectedCategory == null) || _posSelectedCategory == cat;
-                              return ChoiceChip(
-                                label: Text(cat, style: TextStyle(fontSize: 12, color: selected ? Colors.white : AppTheme.textPrimary)),
-                                selected: selected,
-                                selectedColor: AppTheme.primaryColor,
-                                backgroundColor: Colors.white,
-                                onSelected: (_) {
-                                  setState(() {
-                                    _posSelectedCategory = (i == 0) ? null : cat;
-                                  });
-                                },
-                              );
-},
-                            ),
-                          ),
-                        ),
-                      // شبكة المنتجات
-                    Expanded(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: categories.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 6),
+                        itemBuilder: (ctx, i) {
+                          final cat = categories[i];
+                          final selected = (i == 0 && _posSelectedCategory == null) || _posSelectedCategory == cat;
+                          return ChoiceChip(
+                            label: Text(cat, style: TextStyle(fontSize: 12, color: selected ? Colors.white : AppTheme.textPrimary)),
+                            selected: selected,
+                            selectedColor: AppTheme.primaryColor,
+                            backgroundColor: Colors.white,
+                            onSelected: (_) {
+                              setState(() {
+                                _posSelectedCategory = (i == 0) ? null : cat;
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  // شبكة المنتجات
+                  Expanded(
                     child: filteredProducts.isEmpty
                         ? const Center(child: Text('لا توجد منتجات', style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)))
                         : LayoutBuilder(
@@ -1987,6 +2106,17 @@ class _PosPageState extends State<PosPage> {
                                               overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
+                                          if (p.color.isNotEmpty || p.size.isNotEmpty)
+                                            Padding(
+                                              padding: const EdgeInsets.only(top: 2),
+                                              child: Text(
+                                                [if (p.color.isNotEmpty) p.color, if (p.size.isNotEmpty) p.size].join(' — '),
+                                                style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+                                                textAlign: TextAlign.center,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
                                           const SizedBox(height: 4),
                                           Text(
                                             '${p.price} د.ع',
@@ -2027,8 +2157,8 @@ class _PosPageState extends State<PosPage> {
             ),
           ],
         ),
-);
-    }
+    );
+  }
 
 Widget _qtyBtn(IconData icon, Color color, VoidCallback onTap) {
     return GestureDetector(
@@ -2049,5 +2179,16 @@ Widget _qtyBtn(IconData icon, Color color, VoidCallback onTap) {
         child: Icon(icon, color: c, size: 22),
       ),
     );
+  }
+}
+
+// مستمع دورة حياة التطبيق — يحفظ السلة تلقائياً عند الخروج
+class _PosLifecycleObserver extends WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // عند الخروج للخلفية أو إيقاف التطبيق، نحفظ السلة
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      _PosPageState.instance?._saveAutoDraft();
+    }
   }
 }

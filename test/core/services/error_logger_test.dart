@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:lamsa/core/services/error_logger.dart';
+import 'package:cashier_system/core/services/error_logger.dart';
 
 void main() {
   group('LogLevel', () {

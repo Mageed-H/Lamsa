@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:lamsa/core/database/database_helper.dart';
-import 'package:lamsa/core/services/error_logger.dart';
-import 'package:lamsa/core/theme/app_theme.dart';
-import 'package:lamsa/features/sales/presentation/widgets/weekly_sales_chart.dart';
+import 'package:cashier_system/core/database/database_helper.dart';
+import 'package:cashier_system/core/services/error_logger.dart';
+import 'package:cashier_system/core/theme/app_theme.dart';
+import 'package:cashier_system/features/sales/presentation/widgets/weekly_sales_chart.dart';
 
 enum SalesFilter { today, thisWeek, thisMonth, customMonth, customRange, all }
 

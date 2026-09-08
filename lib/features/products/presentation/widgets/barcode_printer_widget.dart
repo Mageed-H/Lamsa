@@ -4,8 +4,8 @@ import 'package:barcode_widget/barcode_widget.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:lamsa/core/theme/app_theme.dart';
-import 'package:lamsa/core/database/database_helper.dart';
+import 'package:cashier_system/core/theme/app_theme.dart';
+import 'package:cashier_system/core/database/database_helper.dart';
 
 /// يعرض معاينة باركود المنتج مع إمكانية الطباعة
 class BarcodePrinterWidget {
