@@ -31,6 +31,7 @@ class _SalesPageState extends State<SalesPage> {
   int _visibleSales = 50;
   DateTime? _selectedMonth;
   DateTimeRange? _selectedRange;
+  String _receiptSearchQuery = '';
 
   @override
   void initState() {
@@ -81,8 +82,14 @@ class _SalesPageState extends State<SalesPage> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     final summary = await DatabaseHelper.instance.getSalesSummary();
+    List<Map<String, dynamic>> sales;
+    if (_receiptSearchQuery.isNotEmpty) {
+      sales = await DatabaseHelper.instance.searchSalesByReceipt(_receiptSearchQuery);
+    } else {
+      final range = _getDateRange(_activeFilter);
+      sales = await DatabaseHelper.instance.getSalesByDateRange(range.$1, range.$2);
+    }
     final range = _getDateRange(_activeFilter);
-    final sales = await DatabaseHelper.instance.getSalesByDateRange(range.$1, range.$2);
     final filterSummary = await DatabaseHelper.instance.getSalesSummaryByDateRange(range.$1, range.$2);
     final inventoryValue = await DatabaseHelper.instance.getTotalInventoryValue();
     final expensesSummary = await DatabaseHelper.instance.getExpensesSummary();
@@ -419,6 +426,34 @@ class _SalesPageState extends State<SalesPage> {
                     color: AppTheme.successColor,
                   ),
                   const SizedBox(height: 20),
+                  // حقل البحث برقم الوصل
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: TextField(
+                      decoration: InputDecoration(
+                        hintText: 'بحث برقم الوصل...',
+                        prefixIcon: const Icon(Icons.receipt_long, color: AppTheme.primaryColor, size: 20),
+                        suffixIcon: _receiptSearchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () {
+                                  setState(() => _receiptSearchQuery = '');
+                                  _loadData();
+                                },
+                              )
+                            : null,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        filled: true,
+                        fillColor: Colors.white,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                      style: const TextStyle(fontSize: 13),
+                      onChanged: (val) => setState(() => _receiptSearchQuery = val),
+                      onSubmitted: (_) => _loadData(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   // فلاتر الوقت
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -684,6 +719,7 @@ class _SalesPageState extends State<SalesPage> {
     final totalProfit = sale['total_profit'] as int? ?? 0;
     final itemsCount = sale['items_count'] as int? ?? 0;
     final discountAmount = sale['discount_amount'] as int? ?? 0;
+    final receiptNumber = sale['receipt_number'] as String? ?? 'R${saleId.toString().padLeft(6, '0')}';
     final createdAt = (sale['created_at'] as String? ?? '').replaceAll('T', '  ');
     final timeStr = createdAt.length >= 16 ? createdAt.substring(0, 16) : createdAt;
 
@@ -710,7 +746,7 @@ class _SalesPageState extends State<SalesPage> {
             ],
           ],
         ),
-        subtitle: Text('ربح: $totalProfit د  |  $timeStr', style: const TextStyle(fontSize: 12)),
+        subtitle: Text('$receiptNumber  |  ربح: $totalProfit د  |  $timeStr', style: const TextStyle(fontSize: 12)),
         trailing: const Icon(Icons.chevron_left, color: AppTheme.textSecondary),
         onTap: () => _showSaleDetails(saleId, totalAmount, discountAmount, timeStr),
       ),

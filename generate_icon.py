@@ -1,10 +1,10 @@
-"""Generate crisp multi-size POS icon for Lamsa.
+"""Generate crisp multi-size POS icon for CashierSystem.
 Small sizes: bold simple design. Large sizes: detailed receipt."""
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-FONT_PATH = r"C:\Users\Mageed\Desktop\FlutterProject\Lamsa-main\assets\fonts\Cairo-Variable.ttf"
-OUT_DIR = r"C:\Users\Mageed\Desktop\FlutterProject\Lamsa-main"
+FONT_PATH = r"C:\Users\Mageed\Desktop\FlutterProject\CashierSystem-main\assets\fonts\Cairo-Variable.ttf"
+OUT_DIR = r"C:\Users\Mageed\Desktop\FlutterProject\CashierSystem-main"
 
 # ── Colours ──────────────────────────────────────────────
 BG     = (15, 23, 42)

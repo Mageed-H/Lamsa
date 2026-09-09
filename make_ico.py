@@ -5,8 +5,8 @@ import io
 import os
 
 src_path = r"D:\Download\pos.png"
-ico_path = r"C:\Users\Mageed\Desktop\FlutterProject\Lamsa-main\windows\runner\resources\app_icon.ico"
-png_path = r"C:\Users\Mageed\Desktop\FlutterProject\Lamsa-main\assets\app_icon.png"
+ico_path = r"C:\Users\Mageed\Desktop\FlutterProject\CashierSystem-main\windows\runner\resources\app_icon.ico"
+png_path = r"C:\Users\Mageed\Desktop\FlutterProject\CashierSystem-main\assets\app_icon.png"
 
 # Load source
 src = Image.open(src_path).convert("RGBA")

@@ -1,10 +1,8 @@
 import 'dart:io';
-import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/features/shop_debts/presentation/pages/shop_debts_page.dart';
@@ -22,6 +20,8 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
   late TabController _tabController;
   List<Map<String, dynamic>> _debts = [];
   Map<String, int> _summary = {};
+  List<Map<String, dynamic>> _shopDebts = [];
+  Map<String, int> _shopSummary = {};
   bool _isLoading = true;
   DebtsFilter _activeFilter = DebtsFilter.unpaid;
 
@@ -43,6 +43,7 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() => setState(() {}));
     DatabaseHelper.debtsRevision.addListener(_loadData);
     _loadData();
   }
@@ -58,10 +59,14 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
     setState(() => _isLoading = true);
     final debts = await DatabaseHelper.instance.getAllDebts();
     final summary = await DatabaseHelper.instance.getDebtsSummary();
+    final shopDebts = await DatabaseHelper.instance.getAllShopDebts();
+    final shopSummary = await DatabaseHelper.instance.getShopDebtsSummary();
     if (mounted) {
       setState(() {
         _debts = debts;
         _summary = summary;
+        _shopDebts = shopDebts;
+        _shopSummary = shopSummary;
         _isLoading = false;
       });
     }
@@ -500,13 +505,25 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
     }
   }
 
-  // ─── تصدير ديون الزبائن PDF ───
+  // ─── تصدير PDF حسب التبويب المفتوح ───
   Future<void> _exportDebtsPdf() async {
     try {
-      final arabic = await PdfGoogleFonts.cairoRegular();
-      final arabicBold = await PdfGoogleFonts.cairoBold();
-      final debts = _filteredDebts;
+      final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
+      final arabicFont = pw.Font.ttf(fontData);
       final doc = pw.Document();
+      final isCustomerTab = _tabController.index == 0;
+      final debts = isCustomerTab ? _filteredDebts : _shopDebts;
+      final title = isCustomerTab ? 'تقرير ديون الزبائن' : 'تقرير ديون المحل';
+      final headers = isCustomerTab
+          ? ['الزبون', 'الهاتف', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة']
+          : ['المورد', 'الهاتف', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة'];
+      final summary = isCustomerTab ? _summary : _shopSummary;
+
+      pw.TextStyle bodyStyle({bool bold = false}) => pw.TextStyle(
+        font: arabicFont,
+        fontSize: 10,
+        fontWeight: bold ? pw.FontWeight.bold : null,
+      );
 
       doc.addPage(pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
@@ -514,25 +531,26 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
         build: (ctx) => [
           pw.Header(
             level: 0,
-            child: pw.Text('تقرير ديون الزبائن',
-                style: pw.TextStyle(font: arabicBold, fontSize: 20)),
+            child: pw.Text(title,
+                style: pw.TextStyle(font: arabicFont, fontSize: 20, fontWeight: pw.FontWeight.bold)),
           ),
           pw.SizedBox(height: 8),
           pw.Text(
-              'الإجمالي: ${_summary['total'] ?? 0} | المدفوع: ${_summary['paid'] ?? 0} | المتبقي: ${_summary['remaining'] ?? 0}',
-              style: pw.TextStyle(font: arabic, fontSize: 12)),
+              'الإجمالي: ${summary['total'] ?? 0} | المدفوع: ${summary['paid'] ?? 0} | المتبقي: ${summary['remaining'] ?? 0}',
+              style: bodyStyle()),
           pw.SizedBox(height: 16),
           pw.TableHelper.fromTextArray(
-            headerStyle: pw.TextStyle(font: arabicBold, fontSize: 11),
-            cellStyle: pw.TextStyle(font: arabic, fontSize: 10),
+            headerStyle: bodyStyle(bold: true),
+            cellStyle: bodyStyle(),
             headerDecoration: const pw.BoxDecoration(color: PdfColors.red50),
-            headers: ['الزبون', 'الهاتف', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة'],
+            headers: headers,
             data: debts.map((d) {
               final total = d['amount'] as int;
               final paid = d['paid'] as int? ?? 0;
               final remaining = total - paid;
+              final name = isCustomerTab ? (d['customer_name'] ?? '') : (d['supplier_name'] ?? '');
               return [
-                d['customer_name'] ?? '',
+                name,
                 d['phone'] ?? '',
                 '$total',
                 '$paid',
@@ -544,47 +562,24 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
         ],
       ));
 
-      await Printing.layoutPdf(onLayout: (_) async => doc.save());
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
-        );
-      }
-    }
-  }
-
-  // ─── تصدير ديون الزبائن CSV ───
-  Future<void> _exportDebtsCsv() async {
-    try {
-      final debts = _filteredDebts;
-      final rows = <List<String>>[
-        ['الزبون', 'الهاتف', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة', 'ملاحظة', 'تاريخ الإنشاء'],
-        ...debts.map((d) {
-          final total = d['amount'] as int;
-          final paid = d['paid'] as int? ?? 0;
-          final remaining = total - paid;
-          return [
-            '${d['customer_name'] ?? ''}',
-            '${d['phone'] ?? ''}',
-            '$total',
-            '$paid',
-            '$remaining',
-            remaining <= 0 ? 'مسدد' : 'غير مسدد',
-            '${d['note'] ?? ''}',
-            '${d['created_at'] ?? ''}',
-          ];
-        }),
-      ];
-      final csv = const ListToCsvConverter().convert(rows);
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/debts_report.csv');
-      await file.writeAsString(csv);
+      // حفظ الملف على سطح المكتب
+      final pdfBytes = await doc.save();
+      final now = DateTime.now();
+      final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final safeName = isCustomerTab ? 'Customer_Debts_$dateStr.pdf' : 'Shop_Debts_$dateStr.pdf';
+      final userProfile = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '.';
+      final sep = Platform.pathSeparator;
+      final desktop = '$userProfile${sep}Desktop';
+      final desktopDir = Directory(desktop);
+      if (!await desktopDir.exists()) await desktopDir.create(recursive: true);
+      final file = File('$desktop$sep$safeName');
+      await file.writeAsBytes(pdfBytes);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('تم الحفظ: ${file.path}'),
+            content: Text('تم حفظ التقرير على سطح المكتب ✓\n$safeName'),
             backgroundColor: AppTheme.successColor,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -858,11 +853,9 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
             icon: const Icon(Icons.more_vert),
             onSelected: (v) {
               if (v == 'pdf') _exportDebtsPdf();
-              if (v == 'csv') _exportDebtsCsv();
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'pdf', child: Row(children: [Icon(Icons.picture_as_pdf, size: 18), SizedBox(width: 8), Text('تصدير PDF')])),
-              PopupMenuItem(value: 'csv', child: Row(children: [Icon(Icons.table_chart, size: 18), SizedBox(width: 8), Text('تصدير CSV')])),
             ],
           ),
           IconButton(
@@ -941,7 +934,7 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
                   ),
                 ),
           // تبويب ديون المحل
-          const ShopDebtsPage(),
+          const ShopDebtsPage(isEmbedded: true),
         ],
       ),
     );

@@ -79,7 +79,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 13, // الإصدار 13: سجل تصحيح الجرد
+      version: 14, // الإصدار 14: رقم الوصل
       onConfigure: _onConfigure, // مفتاح التشفير + العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -447,6 +447,7 @@ class DatabaseHelper {
     await _createV11Tables(db);
     await _createV12Tables(db);
     await _createV13Tables(db);
+    await _createV14Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -491,6 +492,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 13) {
       await _createV13Tables(db);
+    }
+    if (oldVersion < 14) {
+      await _createV14Tables(db);
     }
   }
 
@@ -983,11 +987,16 @@ class DatabaseHelper {
       }
 
       final clampedProfit = (itemsProfit - discountValue).clamp(0, itemsProfit);
+      // توليد رقم الوصل
+      final lastSale = await txn.rawQuery('SELECT id FROM sales ORDER BY id DESC LIMIT 1');
+      final nextId = (lastSale.isEmpty ? 0 : lastSale.first['id'] as int) + 1;
+      final receiptNumber = 'R${nextId.toString().padLeft(6, '0')}';
       saleId = await txn.insert('sales', {
         'total_amount': subtotal - discountValue,
         'total_profit': clampedProfit,
         'items_count': itemsCount,
         'discount_amount': discountValue,
+        'receipt_number': receiptNumber,
         'created_at': DateTime.now().toIso8601String(),
       });
 
@@ -1069,6 +1078,19 @@ class DatabaseHelper {
       return await db.query('sales',
           where: "created_at >= ? AND created_at < ?",
           whereArgs: [from, to],
+          orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// البحث برقم الوصل
+  Future<List<Map<String, dynamic>>> searchSalesByReceipt(String query) async {
+    try {
+      final db = await instance.database;
+      return await db.query('sales',
+          where: "receipt_number LIKE ?",
+          whereArgs: ['%$query%'],
           orderBy: 'created_at DESC');
     } catch (e) {
       return [];
@@ -1290,6 +1312,15 @@ class DatabaseHelper {
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_sa_product ON stock_adjustments (product_id);');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_sa_date ON stock_adjustments (created_at);');
+  }
+
+  Future _createV14Tables(Database db) async {
+    try { await db.execute('ALTER TABLE sales ADD COLUMN receipt_number TEXT'); } catch (_) {}
+    // ترقيم الفواتور القديمة
+    await db.rawUpdate('''
+      UPDATE sales SET receipt_number = 'R' || id WHERE receipt_number IS NULL
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sales_receipt ON sales (receipt_number);');
   }
 
   /// تصحيح جرد منتج يدوياً مع تسجيل السبب

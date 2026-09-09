@@ -52,6 +52,7 @@ class _PosPageState extends State<PosPage> {
   int _lastPrintTotal = 0;
   int _lastPrintGiven = 0;
   int _lastPrintChange = 0;
+  int? _lastPrintSaleId;
   // تصفية المنتجات
   String? _posSelectedCategory;
   // بحث بالاسم/اللون/القياس
@@ -821,6 +822,7 @@ class _PosPageState extends State<PosPage> {
         _lastPrintTotal = total;
         _lastPrintGiven = given;
         _lastPrintChange = changeAmount;
+        _lastPrintSaleId = saleId;
         setState(() {
           _cart.clear();
           _discountAmount = 0;
@@ -837,7 +839,7 @@ class _PosPageState extends State<PosPage> {
         var printFailed = false;
         if (shouldPrint) {
           try {
-            await _printInvoice(cartSnapshot, subtotal, discountVal, total, given, changeAmount);
+            await _printInvoice(cartSnapshot, subtotal, discountVal, total, given, changeAmount, saleId: saleId);
           } catch (e, st) {
             printFailed = true;
             await ErrorLogger.instance.logError(e, st, context: 'طباعة بعد بيع ناجح');
@@ -895,6 +897,7 @@ class _PosPageState extends State<PosPage> {
     int finalTotal,
     int given,
     int change,
+    {int? saleId}
   ) async {
     final settings = await DatabaseHelper.instance.getAllSettings();
     final storeName = settings['store_name'] ?? 'أحلى الحلوين';
@@ -1100,6 +1103,11 @@ class _PosPageState extends State<PosPage> {
               solidDiv,
               // التاريخ والوقت
               pw.Text(dtStr, style: body()),
+              // رقم الوصل
+              if (saleId != null) ...[
+                pw.SizedBox(height: 2),
+                pw.Text('رقم الوصل: R${saleId.toString().padLeft(6, '0')}', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+              ],
               solidDiv,
               pw.SizedBox(height: 2),
               // رأس الجدول (ترتيب RTL: اسم المادة | العدد | السعر | الإجمالي)
@@ -1738,6 +1746,7 @@ class _PosPageState extends State<PosPage> {
                   await _printInvoice(
                     _lastPrintCart!, _lastPrintSubtotal, _lastPrintDiscount,
                     _lastPrintTotal, _lastPrintGiven, _lastPrintChange,
+                    saleId: _lastPrintSaleId,
                   );
                 } catch (e, st) {
                   await ErrorLogger.instance.logError(e, st, context: 'إعادة طباعة آخر فاتورة');

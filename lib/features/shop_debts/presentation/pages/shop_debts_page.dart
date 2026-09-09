@@ -1,15 +1,10 @@
-import 'dart:io';
-import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
 
 class ShopDebtsPage extends StatefulWidget {
-  const ShopDebtsPage({Key? key}) : super(key: key);
+  final bool isEmbedded;
+  const ShopDebtsPage({Key? key, this.isEmbedded = false}) : super(key: key);
 
   @override
   State<ShopDebtsPage> createState() => _ShopDebtsPageState();
@@ -520,271 +515,168 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final content = _buildContent();
+    if (widget.isEmbedded) return content;
     return Scaffold(
       appBar: AppBar(
         title: const Text('ديون المحل', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (v) {
-              if (v == 'pdf') _exportShopDebtsPdf();
-              if (v == 'csv') _exportShopDebtsCsv();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'pdf', child: Row(children: [Icon(Icons.picture_as_pdf, size: 18), SizedBox(width: 8), Text('تصدير PDF')])),
-              PopupMenuItem(value: 'csv', child: Row(children: [Icon(Icons.table_chart, size: 18), SizedBox(width: 8), Text('تصدير CSV')])),
-            ],
-          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData, tooltip: 'تحديث'),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
+      body: content,
+    );
+  }
+  Widget _buildContent() {
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+    return RefreshIndicator(
+      onRefresh: _loadData,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            elevation: 3,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ملخص
-                  Card(
-                    elevation: 3,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            const Icon(Icons.account_balance, color: AppTheme.primaryColor, size: 28),
-                            const SizedBox(width: 8),
-                            const Text('ملخص ديون المحل', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
-                          ]),
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
-                            children: [
-                              Column(children: [
-                                Text('${_summary['total'] ?? 0}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
-                                const Text('الإجمالي', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                              ]),
-                              Column(children: [
-                                Text('${_summary['paid'] ?? 0}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.successColor)),
-                                const Text('المدفوع', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                              ]),
-                              Column(children: [
-                                Text('${_summary['remaining'] ?? 0}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.errorColor)),
-                                const Text('المتبقي', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                              ]),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
+                  Row(children: [
+                    const Icon(Icons.account_balance, color: AppTheme.primaryColor, size: 28),
+                    const SizedBox(width: 8),
+                    const Text('ملخص ديون المحل', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+                  ]),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      Column(children: [
+                        Text('${_summary['total'] ?? 0}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+                        const Text('الإجمالي', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                      ]),
+                      Column(children: [
+                        Text('${_summary['paid'] ?? 0}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.successColor)),
+                        const Text('المدفوع', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                      ]),
+                      Column(children: [
+                        Text('${_summary['remaining'] ?? 0}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.errorColor)),
+                        const Text('المتبقي', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                      ]),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  // زر إضافة
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryColor,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      icon: const Icon(Icons.add),
-                      label: const Text('إضافة دين على المحل', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      onPressed: _showAddDebtDialog,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  // القائمة — عرض تدريجي (30 عنصر في المرة)
-                  if (_debts.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 40),
-                      child: Center(child: Text('لا توجد ديون على المحل', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 16))),
-                    )
-                  else ...[
-                    ..._debts.take(_visibleDebts).map((debt) {
-                      final supplierName = debt['supplier_name'] as String;
-                      final totalAmount = debt['amount'] as int;
-                      final paidAmount = debt['paid'] as int? ?? 0;
-                      final remaining = totalAmount - paidAmount;
-                      final isPaid = remaining <= 0;
-                      final phone = debt['phone'] as String? ?? '';
-                      final createdAt = _formatDate(debt['created_at'] as String?);
-
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: isPaid ? AppTheme.successColor : AppTheme.errorColor,
-                            child: Text(supplierName.substring(0, 1), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                          ),
-                          title: Row(
-                            children: [
-                              Expanded(child: Text(supplierName, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-                              if (isPaid)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(color: AppTheme.successColor, borderRadius: BorderRadius.circular(8)),
-                                  child: const Text('مسدد', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                                ),
-                            ],
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(children: [
-                                Text('$totalAmount دينار', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                if (!isPaid) ...[
-                                  const Text(' | ', style: TextStyle(color: AppTheme.textSecondary)),
-                                  Text('متبقي: $remaining', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold, fontSize: 12)),
-                                ],
-                              ]),
-                              Row(children: [
-                                if (phone.isNotEmpty) ...[
-                                  const Icon(Icons.phone, size: 12, color: AppTheme.textSecondary),
-                                  const SizedBox(width: 4),
-                                  Text(phone, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
-                                  const SizedBox(width: 8),
-                                ],
-                                Text(createdAt, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
-                              ]),
-                            ],
-                          ),
-                          isThreeLine: true,
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (!isPaid)
-                                IconButton(
-                                  icon: const Icon(Icons.payments, color: AppTheme.successColor),
-                                  onPressed: () => _showPayDebtDialog(debt),
-                                  tooltip: 'تسديد',
-                                ),
-                              IconButton(
-                                icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
-                                onPressed: () => _showEditDebtDialog(debt),
-                                tooltip: 'تعديل',
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-                                onPressed: () => _confirmDelete(debt),
-                                tooltip: 'حذف',
-                              ),
-                            ],
-                          ),
-                          onTap: () => _showDebtDetails(debt),
-                        ),
-                      );
-                    }),
-                    if (_debts.length > _visibleDebts)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: OutlinedButton.icon(
-                          onPressed: () => setState(() => _visibleDebts += 30),
-                          icon: const Icon(Icons.expand_more),
-                          label: Text('عرض المزيد (${_debts.length - _visibleDebts} متبقية)'),
-                        ),
-                      ),
-                  ],
                 ],
               ),
             ),
-    );
-  }
-
-  Future<void> _exportShopDebtsPdf() async {
-    try {
-      final arabic = await PdfGoogleFonts.cairoRegular();
-      final arabicBold = await PdfGoogleFonts.cairoBold();
-      final doc = pw.Document();
-
-      doc.addPage(pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        textDirection: pw.TextDirection.rtl,
-        build: (ctx) => [
-          pw.Header(
-            level: 0,
-            child: pw.Text('تقرير ديون المحل',
-                style: pw.TextStyle(font: arabicBold, fontSize: 20)),
           ),
-          pw.SizedBox(height: 8),
-          pw.Text(
-              'الإجمالي: ${_summary['total'] ?? 0} | المدفوع: ${_summary['paid'] ?? 0} | المتبقي: ${_summary['remaining'] ?? 0}',
-              style: pw.TextStyle(font: arabic, fontSize: 12)),
-          pw.SizedBox(height: 16),
-          pw.TableHelper.fromTextArray(
-            headerStyle: pw.TextStyle(font: arabicBold, fontSize: 11),
-            cellStyle: pw.TextStyle(font: arabic, fontSize: 10),
-            headerDecoration: const pw.BoxDecoration(color: PdfColors.red50),
-            headers: ['المورد', 'الهاتف', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة'],
-            data: _debts.map((d) {
-              final total = d['amount'] as int;
-              final paid = d['paid'] as int? ?? 0;
-              final remaining = total - paid;
-              return [
-                d['supplier_name'] ?? '',
-                d['phone'] ?? '',
-                '$total',
-                '$paid',
-                '$remaining',
-                remaining <= 0 ? 'مسدد' : 'غير مسدد',
-              ];
-            }).toList(),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.add),
+              label: const Text('إضافة دين على المحل', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              onPressed: _showAddDebtDialog,
+            ),
           ),
+          const SizedBox(height: 16),
+          if (_debts.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 40),
+              child: Center(child: Text('لا توجد ديون على المحل', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 16))),
+            )
+          else ...[
+            ..._debts.take(_visibleDebts).map((debt) {
+              final supplierName = debt['supplier_name'] as String;
+              final totalAmount = debt['amount'] as int;
+              final paidAmount = debt['paid'] as int? ?? 0;
+              final remaining = totalAmount - paidAmount;
+              final isPaid = remaining <= 0;
+              final phone = debt['phone'] as String? ?? '';
+              final createdAt = _formatDate(debt['created_at'] as String?);
+
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: isPaid ? AppTheme.successColor : AppTheme.errorColor,
+                    child: Text(supplierName.substring(0, 1), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  ),
+                  title: Row(
+                    children: [
+                      Expanded(child: Text(supplierName, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                      if (isPaid)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(color: AppTheme.successColor, borderRadius: BorderRadius.circular(8)),
+                          child: const Text('مسدد', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                        ),
+                    ],
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        Text('$totalAmount دينار', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        if (!isPaid) ...[
+                          const Text(' | ', style: TextStyle(color: AppTheme.textSecondary)),
+                          Text('متبقي: $remaining', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                        ],
+                      ]),
+                      Row(children: [
+                        if (phone.isNotEmpty) ...[
+                          const Icon(Icons.phone, size: 12, color: AppTheme.textSecondary),
+                          const SizedBox(width: 4),
+                          Text(phone, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                          const SizedBox(width: 8),
+                        ],
+                        Text(createdAt, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                      ]),
+                    ],
+                  ),
+                  isThreeLine: true,
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (!isPaid)
+                        IconButton(
+                          icon: const Icon(Icons.payments, color: AppTheme.successColor),
+                          onPressed: () => _showPayDebtDialog(debt),
+                          tooltip: 'تسديد',
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
+                        onPressed: () => _showEditDebtDialog(debt),
+                        tooltip: 'تعديل',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
+                        onPressed: () => _confirmDelete(debt),
+                        tooltip: 'حذف',
+                      ),
+                    ],
+                  ),
+                  onTap: () => _showDebtDetails(debt),
+                ),
+              );
+            }),
+            if (_debts.length > _visibleDebts)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: OutlinedButton.icon(
+                  onPressed: () => setState(() => _visibleDebts += 30),
+                  icon: const Icon(Icons.expand_more),
+                  label: Text('عرض المزيد (${_debts.length - _visibleDebts} متبقية)'),
+                ),
+              ),
+          ],
         ],
-      ));
-
-      await Printing.layoutPdf(onLayout: (_) async => doc.save());
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
-        );
-      }
-    }
-  }
-
-  Future<void> _exportShopDebtsCsv() async {
-    try {
-      final rows = <List<String>>[
-        ['المورد', 'الهاتف', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة', 'ملاحظة', 'تاريخ الإنشاء'],
-        ..._debts.map((d) {
-          final total = d['amount'] as int;
-          final paid = d['paid'] as int? ?? 0;
-          final remaining = total - paid;
-          return [
-            '${d['supplier_name'] ?? ''}',
-            '${d['phone'] ?? ''}',
-            '$total',
-            '$paid',
-            '$remaining',
-            remaining <= 0 ? 'مسدد' : 'غير مسدد',
-            '${d['note'] ?? ''}',
-            '${d['created_at'] ?? ''}',
-          ];
-        }),
-      ];
-      final csv = const ListToCsvConverter().convert(rows);
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/shop_debts_report.csv');
-      await file.writeAsString(csv);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('تم الحفظ: ${file.path}'),
-            backgroundColor: AppTheme.successColor,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
-        );
-      }
-    }
+      ),
+    );
   }
 }
