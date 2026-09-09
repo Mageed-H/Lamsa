@@ -143,6 +143,7 @@ class _PosPageState extends State<PosPage> {
           // إذا منتج جديد، نضيفه للفاتورة بكمية 1
           _cart.add({'product': product, 'quantity': 1});
         }
+        _posSearchQuery = '';
       });
 
       // فحص المخزون وتنبيه إذا كان قليلاً
