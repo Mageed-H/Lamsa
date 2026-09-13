@@ -1285,7 +1285,7 @@ class _PosPageState extends State<PosPage> {
       final itemDiscount = (item['item_discount'] as int?) ?? 0;
       final effectivePrice = itemPrice - itemDiscount;
       final rowTotal = effectivePrice * qty;
-      final extras = [if (product.color.isNotEmpty) product.color, if (product.size.isNotEmpty) product.size].join(' ');
+      // final extras = [if (product.color.isNotEmpty) product.color, if (product.size.isNotEmpty) product.size].join(' ');
       itemWidgets.add(
         pw.Padding(
           padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
@@ -1302,13 +1302,13 @@ class _PosPageState extends State<PosPage> {
                       textAlign: pw.TextAlign.center,
                       overflow: pw.TextOverflow.clip,
                     ),
-                    if (extras.isNotEmpty)
-                      pw.Text(
-                        extras,
-                        style: pw.TextStyle(font: aroFont, fontSize: bodyFs - 1, color: PdfColors.grey600),
-                        textDirection: pw.TextDirection.rtl,
-                        textAlign: pw.TextAlign.center,
-                      ),
+                    // if (extras.isNotEmpty)
+                    //   pw.Text(
+                    //     extras,
+                    //     style: pw.TextStyle(font: aroFont, fontSize: bodyFs - 1, color: PdfColors.grey600),
+                    //     textDirection: pw.TextDirection.rtl,
+                    //     textAlign: pw.TextAlign.center,
+                    //   ),
                   ],
                 ),
               ),

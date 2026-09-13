@@ -946,7 +946,7 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
         final rowTotal = itemPrice * qty;
         final color = item['color'] as String? ?? '';
         final size = item['size'] as String? ?? '';
-        final extras = [if (color.isNotEmpty) color, if (size.isNotEmpty) size].join(' ');
+        // final extras = [if (color.isNotEmpty) color, if (size.isNotEmpty) size].join(' ');
         itemWidgets.add(
           pw.Padding(
             padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
@@ -957,8 +957,8 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
                   child: pw.Column(
                     children: [
                       pw.Text(name, style: body(), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center),
-                      if (extras.isNotEmpty)
-                        pw.Text(extras, style: pw.TextStyle(font: aroFont, fontSize: bodyFs - 1, color: PdfColors.grey600), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center),
+                      // if (extras.isNotEmpty)
+                      //   pw.Text(extras, style: pw.TextStyle(font: aroFont, fontSize: bodyFs - 1, color: PdfColors.grey600), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center),
                     ],
                   ),
                 ),
@@ -1208,6 +1208,32 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
             const SizedBox(height: 8),
           ],
           // زر الإرجاع
+          // زر إرجاع الكل (يحدد كل المنتجات دفعة واحدة)
+          if (!_isReturnAll)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.warningColor,
+                    side: const BorderSide(color: AppTheme.warningColor),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  icon: const Icon(Icons.select_all, size: 18),
+                  label: const Text('تحديد الكل للإرجاع', style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: () {
+                    setState(() {
+                      for (final item in widget.items) {
+                        final id = item['id'] as int;
+                        final qty = item['quantity'] as int? ?? 0;
+                        _returnQtys[id] = qty;
+                      }
+                    });
+                  },
+                ),
+              ),
+            ),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
