@@ -19,6 +19,8 @@ enum DebtsFilter { unpaid, paid, all }
 class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   List<Map<String, dynamic>> _debts = [];
+  List<Map<String, dynamic>> _groupedDebts = [];
+  List<String> _customerNames = [];
   Map<String, int> _summary = {};
   List<Map<String, dynamic>> _shopDebts = [];
   Map<String, int> _shopSummary = {};
@@ -58,12 +60,16 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     final debts = await DatabaseHelper.instance.getAllDebts();
+    final grouped = await DatabaseHelper.instance.getDebtsGroupedByName();
+    final names = await DatabaseHelper.instance.getDebtCustomerNames();
     final summary = await DatabaseHelper.instance.getDebtsSummary();
     final shopDebts = await DatabaseHelper.instance.getAllShopDebts();
     final shopSummary = await DatabaseHelper.instance.getShopDebtsSummary();
     if (mounted) {
       setState(() {
         _debts = debts;
+        _groupedDebts = grouped;
+        _customerNames = names;
         _summary = summary;
         _shopDebts = shopDebts;
         _shopSummary = shopSummary;
@@ -72,14 +78,14 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
     }
   }
 
-  List<Map<String, dynamic>> get _filteredDebts {
+  List<Map<String, dynamic>> get _filteredGroupedDebts {
     switch (_activeFilter) {
       case DebtsFilter.paid:
-        return _debts.where((d) => (d['paid'] as int? ?? 0) >= (d['amount'] as int? ?? 0)).toList();
+        return _groupedDebts.where((g) => (g['total_paid'] as int) >= (g['total_amount'] as int)).toList();
       case DebtsFilter.unpaid:
-        return _debts.where((d) => (d['paid'] as int? ?? 0) < (d['amount'] as int? ?? 0)).toList();
+        return _groupedDebts.where((g) => (g['total_paid'] as int) < (g['total_amount'] as int)).toList();
       case DebtsFilter.all:
-        return _debts;
+        return _groupedDebts;
     }
   }
 
@@ -89,6 +95,8 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
     final phoneCtrl = TextEditingController();
     final amountCtrl = TextEditingController();
     final noteCtrl = TextEditingController();
+    String? selectedExistingName;
+    bool isNewCustomer = true;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -102,25 +110,84 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(
-                  controller: nameCtrl,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'اسم الزبون *',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.person),
+                // ─── اختيار زبون موجود أو جديد ───
+                if (_customerNames.isNotEmpty) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: RadioListTile<bool>(
+                          title: const Text('زبون جديد', style: TextStyle(fontSize: 13)),
+                          value: true,
+                          groupValue: isNewCustomer,
+                          onChanged: (v) => setDialogState(() {
+                            isNewCustomer = v!;
+                            if (isNewCustomer) {
+                              selectedExistingName = null;
+                              nameCtrl.clear();
+                              phoneCtrl.clear();
+                            }
+                          }),
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                        ),
+                      ),
+                      Expanded(
+                        child: RadioListTile<bool>(
+                          title: const Text('زبون موجود', style: TextStyle(fontSize: 13)),
+                          value: false,
+                          groupValue: isNewCustomer,
+                          onChanged: (v) => setDialogState(() {
+                            isNewCustomer = v!;
+                            if (!isNewCustomer && _customerNames.isNotEmpty) {
+                              selectedExistingName = _customerNames.first;
+                              nameCtrl.text = _customerNames.first;
+                            }
+                          }),
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
+                  if (!isNewCustomer) ...[
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: selectedExistingName,
+                      items: _customerNames.map((n) => DropdownMenuItem(value: n, child: Text(n))).toList(),
+                      onChanged: (v) => setDialogState(() {
+                        selectedExistingName = v;
+                        nameCtrl.text = v ?? '';
+                      }),
+                      decoration: const InputDecoration(
+                        labelText: 'اختر الزبون',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.person_search),
+                      ),
+                    ),
+                  ],
+                ],
                 const SizedBox(height: 12),
-                TextField(
-                  controller: phoneCtrl,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'رقم الهاتف (اختياري)',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.phone),
+                if (isNewCustomer) ...[
+                  TextField(
+                    controller: nameCtrl,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'اسم الزبون *',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person),
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'رقم الهاتف (اختياري)',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.phone),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 TextField(
                   controller: amountCtrl,
@@ -205,6 +272,113 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
               content: Text('حدث خطأ أثناء إضافة الدين'),
               backgroundColor: AppTheme.errorColor,
             ),
+          );
+        }
+      }
+    }
+  }
+
+  // ─── إضافة دين لزبون موجود ───
+  Future<void> _showAddDebtForCustomer(String customerName, String phone) async {
+    final amountCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          'إضافة فاتورة — $customerName',
+          style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (phone.isNotEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.neutralLightColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.phone, size: 16, color: AppTheme.textSecondary),
+                      const SizedBox(width: 8),
+                      Text(phone, style: const TextStyle(color: AppTheme.textSecondary)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              TextField(
+                controller: amountCtrl,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'مبلغ الدين (دينار) *',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.attach_money),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: noteCtrl,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'ملاحظة (اختياري)',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.note),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryColor,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              final amount = int.tryParse(amountCtrl.text.trim());
+              if (amount == null || amount <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('الرجاء إدخال مبلغ صحيح'), backgroundColor: AppTheme.errorColor),
+                );
+                return;
+              }
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
+      final result = await DatabaseHelper.instance.insertDebt(
+        customerName: customerName,
+        phone: phone.isEmpty ? null : phone,
+        amount: amount,
+        note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
+      );
+      if (mounted) {
+        if (result > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('تم إضافة فاتورة جديدة لـ $customerName بنجاح'),
+              backgroundColor: AppTheme.successColor,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('حدث خطأ أثناء إضافة الدين'), backgroundColor: AppTheme.errorColor),
           );
         }
       }
@@ -512,7 +686,7 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
       final arabicFont = pw.Font.ttf(fontData);
       final doc = pw.Document();
       final isCustomerTab = _tabController.index == 0;
-      final debts = isCustomerTab ? _filteredDebts : _shopDebts;
+      final debts = isCustomerTab ? _debts : _shopDebts;
       final title = isCustomerTab ? 'تقرير ديون الزبائن' : 'تقرير ديون المحل';
       final headers = isCustomerTab
           ? ['الزبون', 'الهاتف', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة']
@@ -592,247 +766,6 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
     }
   }
 
-  // ─── عرض تفاصيل الدين ───
-  void _showDebtDetails(Map<String, dynamic> debt) async {
-    final debtId = debt['id'] as int;
-    final totalAmount = debt['amount'] as int;
-    final paidAmount = debt['paid'] as int? ?? 0;
-    final remaining = totalAmount - paidAmount;
-    final createdAt = _formatDate(debt['created_at'] as String?);
-    final updatedAt = _formatDate(debt['updated_at'] as String?);
-    final phone = debt['phone'] as String? ?? '';
-    final note = debt['note'] as String? ?? '';
-    final isPaid = remaining <= 0;
-
-    // جلب سجل الدفعات
-    final payments = await DatabaseHelper.instance.getDebtPayments(debtId);
-
-    if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.3,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (_, scrollCtrl) => SingleChildScrollView(
-          controller: scrollCtrl,
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppTheme.neutralColor,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    debt['customer_name'] as String,
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isPaid ? AppTheme.successColor : AppTheme.errorColor,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      isPaid ? 'مسدد' : 'غير مسدد',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
-              if (phone.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(Icons.phone, size: 16, color: AppTheme.textSecondary),
-                    const SizedBox(width: 8),
-                    Text(phone, style: const TextStyle(color: AppTheme.textSecondary)),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppTheme.neutralLightColor,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    Column(
-                      children: [
-                        Text(
-                          '$totalAmount',
-                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
-                        ),
-                        const Text('الإجمالي', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                      ],
-                    ),
-                    Column(
-                      children: [
-                        Text(
-                          '$paidAmount',
-                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.successColor),
-                        ),
-                        const Text('المدفوع', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                      ],
-                    ),
-                    Column(
-                      children: [
-                        Text(
-                          '$remaining',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: isPaid ? AppTheme.successColor : AppTheme.errorColor,
-                          ),
-                        ),
-                        const Text('المتبقي', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              if (note.isNotEmpty) ...[
-                Row(
-                  children: [
-                    const Icon(Icons.note, size: 16, color: AppTheme.textSecondary),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(note, style: const TextStyle(color: AppTheme.textSecondary)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-              ],
-              Row(
-                children: [
-                  const Icon(Icons.calendar_today, size: 14, color: AppTheme.textSecondary),
-                  const SizedBox(width: 8),
-                  Text('أنشئ: $createdAt', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  const Icon(Icons.update, size: 14, color: AppTheme.textSecondary),
-                  const SizedBox(width: 8),
-                  Text('آخر تحديث: $updatedAt', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                ],
-              ),
-              // ─── سجل الدفعات ───
-              if (payments.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    const Icon(Icons.history, size: 18, color: AppTheme.primaryColor),
-                    const SizedBox(width: 8),
-                    Text(
-                      'سجل الدفعات (${payments.length})',
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor, fontSize: 14),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ...payments.map((p) {
-                  final payAmount = p['amount'] as int;
-                  final payDate = _formatDate(p['created_at'] as String?);
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 6),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppTheme.successColor.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.successColor.withValues(alpha: 0.2)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.check_circle, size: 16, color: AppTheme.successColor),
-                            const SizedBox(width: 8),
-                            Text(
-                              '$payAmount دينار',
-                              style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.successColor),
-                            ),
-                          ],
-                        ),
-                        Text(
-                          payDate,
-                          style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ] else if (paidAmount > 0) ...[
-                // حالة قديمة — دفعات بدون سجل
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.warningColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.info_outline, size: 16, color: AppTheme.warningColor),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'هناك مدفوعات مسجلة لكن بدون تفاصيل تواريخ',
-                          style: TextStyle(color: AppTheme.warningColor, fontSize: 12),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              const SizedBox(height: 20),
-              if (!isPaid)
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.successColor,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    icon: const Icon(Icons.payments),
-                    label: const Text('تسجيل دفعة', style: TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      _showPayDebtDialog(debt);
-                    },
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -903,7 +836,7 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
                         ),
                       ),
                       const SizedBox(height: 16),
-                      if (_filteredDebts.isEmpty)
+                      if (_filteredGroupedDebts.isEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 40),
                           child: Center(
@@ -918,15 +851,14 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
                           ),
                         )
                       else ...[
-                        // عرض تدريجي — 30 عنصر في المرة لسلاسة أكبر مع القوائم الضخمة
-                        ..._filteredDebts.take(_visibleDebts).map((debt) => _buildDebtCard(debt)),
-                        if (_filteredDebts.length > _visibleDebts)
+                        ..._filteredGroupedDebts.take(_visibleDebts).map((group) => _buildGroupedDebtCard(group)),
+                        if (_filteredGroupedDebts.length > _visibleDebts)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             child: OutlinedButton.icon(
                               onPressed: () => setState(() => _visibleDebts += 30),
                               icon: const Icon(Icons.expand_more),
-                              label: Text('عرض المزيد (${_filteredDebts.length - _visibleDebts} متبقية)'),
+                              label: Text('عرض المزيد (${_filteredGroupedDebts.length - _visibleDebts} متبقية)'),
                             ),
                           ),
                       ],
@@ -1030,99 +962,250 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
     );
   }
 
-  Widget _buildDebtCard(Map<String, dynamic> debt) {
-    final customerName = debt['customer_name'] as String;
-    final totalAmount = debt['amount'] as int;
-    final paidAmount = debt['paid'] as int? ?? 0;
-    final remaining = totalAmount - paidAmount;
-    final isPaid = remaining <= 0;
-    final createdAt = _formatDate(debt['created_at'] as String?);
-    final phone = debt['phone'] as String? ?? '';
+  // ─── بطاقة زبون مع كل فواتيره ───
+  Widget _buildGroupedDebtCard(Map<String, dynamic> group) {
+    final customerName = group['customer_name'] as String;
+    final phone = group['phone'] as String? ?? '';
+    final debts = group['debts'] as List<Map<String, dynamic>>;
+    final totalAmount = group['total_amount'] as int;
+    final totalPaid = group['total_paid'] as int;
+    final totalRemaining = totalAmount - totalPaid;
+    final isFullyPaid = totalRemaining <= 0;
+    final unpaidCount = debts.where((d) {
+      final rem = (d['amount'] as int) - ((d['paid'] as int?) ?? 0);
+      return rem > 0;
+    }).length;
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: isPaid ? AppTheme.successColor : AppTheme.errorColor,
-          child: Text(
-            customerName.substring(0, 1),
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-        ),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                customerName,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis,
-              ),
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      elevation: 2,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: !isFullyPaid,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+          leading: CircleAvatar(
+            backgroundColor: isFullyPaid ? AppTheme.successColor : AppTheme.errorColor,
+            radius: 24,
+            child: Text(
+              customerName.substring(0, 1),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
             ),
-            if (isPaid)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppTheme.successColor,
-                  borderRadius: BorderRadius.circular(8),
+          ),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  customerName,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  overflow: TextOverflow.ellipsis,
                 ),
-                child: const Text('مسدد', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
               ),
-          ],
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  '$totalAmount دينار',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              if (isFullyPaid)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.successColor,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text('مسدد', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                )
+              else if (unpaidCount > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.errorColor,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text('$unpaidCount غير مسدّد', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                 ),
-                if (!isPaid) ...[
-                  const Text(' | ', style: TextStyle(color: AppTheme.textSecondary)),
+            ],
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 4),
+              Row(
+                children: [
                   Text(
-                    'متبقي: $remaining',
-                    style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold, fontSize: 12),
+                    'المجموع: $totalAmount',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryColor),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'المدفوع: $totalPaid',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.successColor),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'المتبقي: $totalRemaining',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: isFullyPaid ? AppTheme.successColor : AppTheme.errorColor,
+                    ),
                   ),
                 ],
-              ],
-            ),
-            Row(
-              children: [
-                if (phone.isNotEmpty) ...[
-                  const Icon(Icons.phone, size: 12, color: AppTheme.textSecondary),
-                  const SizedBox(width: 4),
-                  Text(phone, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
-                  const SizedBox(width: 8),
-                ],
-                Text(createdAt, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
-              ],
-            ),
-          ],
-        ),
-        isThreeLine: true,
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!isPaid)
-              IconButton(
-                icon: const Icon(Icons.payments, color: AppTheme.successColor),
-                onPressed: () => _showPayDebtDialog(debt),
-                tooltip: 'تسجيل دفعة',
               ),
-            IconButton(
-              icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
-              onPressed: () => _showEditDebtDialog(debt),
-              tooltip: 'تعديل',
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-              onPressed: () => _confirmDelete(debt),
-              tooltip: 'حذف',
+              if (phone.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    const Icon(Icons.phone, size: 12, color: AppTheme.textSecondary),
+                    const SizedBox(width: 4),
+                    Text(phone, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                  ],
+                ),
+              ],
+            ],
+          ),
+          children: [
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            // ─── قائمة الفواتير ───
+            ...debts.map((debt) {
+              final debtAmount = debt['amount'] as int;
+              final debtPaid = (debt['paid'] as int?) ?? 0;
+              final debtRemaining = debtAmount - debtPaid;
+              final debtPaidOff = debtRemaining <= 0;
+              final createdAt = _formatDate(debt['created_at'] as String?);
+              final note = debt['note'] as String? ?? '';
+              return Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: debtPaidOff
+                      ? AppTheme.successColor.withValues(alpha: 0.06)
+                      : AppTheme.neutralLightColor,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: debtPaidOff
+                        ? AppTheme.successColor.withValues(alpha: 0.3)
+                        : AppTheme.errorColor.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          debtPaidOff ? Icons.check_circle : Icons.receipt_long,
+                          size: 16,
+                          color: debtPaidOff ? AppTheme.successColor : AppTheme.errorColor,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '$debtAmount دينار',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              color: debtPaidOff ? AppTheme.successColor : AppTheme.primaryColor,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          createdAt,
+                          style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                    if (debtPaid > 0 && !debtPaidOff) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(Icons.check, size: 12, color: AppTheme.successColor),
+                          const SizedBox(width: 4),
+                          Text(
+                            'مدفوع: $debtPaid | متبقي: $debtRemaining',
+                            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ],
+                    if (note.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        note,
+                        style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    // ─── أزرار الفرد ───
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        if (!debtPaidOff)
+                          SizedBox(
+                            height: 28,
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.successColor,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                              ),
+                              icon: const Icon(Icons.payments, size: 14),
+                              label: const Text('تسديد', style: TextStyle(fontSize: 11)),
+                              onPressed: () => _showPayDebtDialog(debt),
+                            ),
+                          ),
+                        const SizedBox(width: 6),
+                        SizedBox(
+                          height: 28,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTheme.primaryColor,
+                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                            icon: const Icon(Icons.edit, size: 14),
+                            label: const Text('تعديل', style: TextStyle(fontSize: 11)),
+                            onPressed: () => _showEditDebtDialog(debt),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        SizedBox(
+                          height: 28,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTheme.errorColor,
+                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                            icon: const Icon(Icons.delete_outline, size: 14),
+                            label: const Text('حذف', style: TextStyle(fontSize: 11)),
+                            onPressed: () => _confirmDelete(debt),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
+            // ─── زر إضافة فاتورة جديدة لنفس الزبون ───
+            const SizedBox(height: 4),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryColor,
+                  side: const BorderSide(color: AppTheme.primaryColor),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.add, size: 18),
+                label: Text('إضافة فاتورة جديدة لـ $customerName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                onPressed: () => _showAddDebtForCustomer(customerName, phone),
+              ),
             ),
           ],
         ),
-        onTap: () => _showDebtDetails(debt),
       ),
     );
   }

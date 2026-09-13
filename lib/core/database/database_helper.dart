@@ -1810,6 +1810,48 @@ class DatabaseHelper {
     }
   }
 
+  /// جلب الديون مجمّعة حسب اسم الزبون
+  Future<List<Map<String, dynamic>>> getDebtsGroupedByName() async {
+    try {
+      final db = await instance.database;
+      final rows = await db.query('debts', orderBy: 'created_at DESC');
+      final map = <String, Map<String, dynamic>>{};
+      for (final row in rows) {
+        final name = (row['customer_name'] as String?) ?? '';
+        if (!map.containsKey(name)) {
+          map[name] = {
+            'customer_name': name,
+            'phone': row['phone'],
+            'debts': <Map<String, dynamic>>[],
+            'total_amount': 0,
+            'total_paid': 0,
+          };
+        }
+        final entry = map[name]!;
+        (entry['debts'] as List<Map<String, dynamic>>).add(row);
+        entry['total_amount'] = (entry['total_amount'] as int) + (row['amount'] as int);
+        entry['total_paid'] = (entry['total_paid'] as int) + ((row['paid'] as int?) ?? 0);
+        if (row['phone'] != null && row['phone'].toString().isNotEmpty && entry['phone'] == null) {
+          entry['phone'] = row['phone'];
+        }
+      }
+      return map.values.toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// جلب أسماء الزبائن sağlıklين من الديون
+  Future<List<String>> getDebtCustomerNames() async {
+    try {
+      final db = await instance.database;
+      final rows = await db.rawQuery('SELECT DISTINCT customer_name FROM debts WHERE customer_name IS NOT NULL AND customer_name != \'\' ORDER BY customer_name');
+      return rows.map((r) => r['customer_name'] as String).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
   /// جلب الديون غير المسددة فقط
   Future<List<Map<String, dynamic>>> getUnpaidDebts() async {
     try {
