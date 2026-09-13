@@ -13,8 +13,10 @@ class ProductsPage extends StatefulWidget {
   State<ProductsPage> createState() => _ProductsPageState();
 }
 
-class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderStateMixin {
+class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMixin {
   late TabController _tabController;
+  late AnimationController _selectionAnimController;
+  late Animation<double> _selectionSlideAnimation;
   final _formKey = GlobalKey<FormState>();
 
   // Controllers لحقول الإدخال
@@ -62,10 +64,51 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   // بحث القائمة
   String _listSearchQuery = '';
 
+  // باركودات ثانوية للبحث
+  Map<int, List<String>> _secondaryBarcodes = {};
+
+  // تحديد متعدد
+  bool _isSelectionMode = false;
+  final Set<int> _selectedProductIds = {};
+  int _bulkOperationType = 0; // 0=إضافة, 1=خصم, 2=تعيين
+  final _bulkQtyController = TextEditingController();
+
+  // ─── الفلاتر والترتيب ───
+  Map<int, Map<String, dynamic>> _productSalesStats = {};
+  String _sortBy = 'name'; // name, price, stock, profit, sold, lastSold
+  bool _sortAsc = true;
+  bool _showFilters = false;
+
+  // فلاتر المخزون
+  String _filterStock = ''; // '', 'zero', 'low', 'medium', 'high'
+  // فلترة السعر
+  int? _filterPriceMin;
+  int? _filterPriceMax;
+  // فلترة الربح
+  int? _filterProfitMin;
+  int? _filterProfitMax;
+  // فلترة اللون
+  String _filterColor = '';
+  // فلترة القياس
+  String _filterSize = '';
+  // فلترة القسم
+  String _filterCategory = '';
+  // فلترة المبيعات
+  bool _filterOnlySold = false;
+  bool _filterNeverSold = false;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _selectionAnimController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _selectionSlideAnimation = CurvedAnimation(
+      parent: _selectionAnimController,
+      curve: Curves.easeOutCubic,
+    );
     DatabaseHelper.productsRevision.addListener(_loadAllProducts);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
@@ -90,6 +133,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   @override
   void dispose() {
     _tabController.dispose();
+    _selectionAnimController.dispose();
     DatabaseHelper.productsRevision.removeListener(_loadAllProducts);
     _nameController.dispose();
     _colorController.dispose();
@@ -108,6 +152,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
     _listScanController.dispose();
     _listScanFocusNode.dispose();
     _listScrollController.dispose();
+    _bulkQtyController.dispose();
     super.dispose();
   }
 
@@ -128,9 +173,13 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
     if (!mounted) return;
     setState(() => _isLoadingProducts = true);
     final products = await DatabaseHelper.instance.getAllProducts();
+    final barcodesMap = await DatabaseHelper.instance.getAllBarcodesByProduct();
+    final salesStats = await DatabaseHelper.instance.getProductSalesStats();
     if (mounted) {
       setState(() {
         _allProducts = products;
+        _secondaryBarcodes = barcodesMap;
+        _productSalesStats = salesStats;
         _isLoadingProducts = false;
       });
     }
@@ -425,25 +474,131 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   }
 
   void _confirmDelete(ProductModel product) {
+    final profit = product.price - product.purchasePrice;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('تأكيد الحذف'),
-        content: Text('هل تريد حذف "${product.name}"؟\nالباركود: ${product.barcode}'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: AppTheme.errorColor, size: 28),
+            const SizedBox(width: 8),
+            const Text('تأكيد الحذف', style: TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.errorColor.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.errorColor.withOpacity(0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 6),
+                  _deleteDetailRow(Icons.category, 'القسم', product.category),
+                  if (product.color.isNotEmpty) _deleteDetailRow(Icons.palette, 'اللون', product.color),
+                  if (product.size.isNotEmpty) _deleteDetailRow(Icons.straighten, 'القياس', product.size),
+                  _deleteDetailRow(Icons.attach_money, 'سعر الشراء', '${product.purchasePrice} د'),
+                  _deleteDetailRow(Icons.sell, 'سعر البيع', '${product.price} د'),
+                  _deleteDetailRow(Icons.trending_up, 'الربح', '$profit د', color: profit > 0 ? AppTheme.successColor : AppTheme.errorColor),
+                  _deleteDetailRow(Icons.inventory, 'المخزون', '${product.stock} قطعة'),
+                  if (product.barcode.isNotEmpty) _deleteDetailRow(Icons.qr_code, 'الباركود', product.barcode),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(Icons.info_outline, color: AppTheme.warningColor, size: 16),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'سيتم حفظ المنتج في سجل الحذف ويمكنك استرجاعه لاحقاً.',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor, foregroundColor: Colors.white),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء', style: TextStyle(fontSize: 14)),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.delete_forever, size: 18),
+            label: const Text('حذف'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.errorColor,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
             onPressed: () async {
-              await DatabaseHelper.instance.deleteProduct(product.id!);
+              final success = await DatabaseHelper.instance.deleteProductWithLog(product.id!);
               if (ctx.mounted) Navigator.pop(ctx);
-              _loadAllProducts();
+              if (success && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('تم حذف "${product.name}" — يمكن استرجاعه من سجل الحذف'),
+                    backgroundColor: AppTheme.warningColor,
+                    action: SnackBarAction(
+                      label: 'استرجاع',
+                      textColor: Colors.white,
+                      onPressed: _showDeleteLog,
+                    ),
+                  ),
+                );
+                _loadAllProducts();
+              }
             },
-            child: const Text('حذف'),
           ),
         ],
       ),
     );
+  }
+
+  Widget _deleteDetailRow(IconData icon, String label, String value, {Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: AppTheme.textSecondary),
+          const SizedBox(width: 6),
+          Text('$label: ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+          Expanded(
+            child: Text(value, style: TextStyle(
+              color: color ?? AppTheme.textPrimary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            )),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── سجل الحذف والاسترجاع ───
+  void _showDeleteLog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.3,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (ctx, scrollController) => _DeleteLogSheet(scrollController: scrollController),
+      ),
+    ).then((_) => _loadAllProducts());
   }
 
   // تكرار منتج كـ variant جديد (same name, category, prices — clear color/size/barcode)
@@ -468,77 +623,58 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   }
 
   // سجل التعديلات العالمي لجميع المنتجات
-  Future<void> _showGlobalAdjustmentHistory() async {
-    final adjustments = await DatabaseHelper.instance.getAllAdjustments();
-    if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.3,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (ctx, scrollController) => ListView(
-          controller: scrollController,
-          padding: const EdgeInsets.all(16),
-          children: [
-            const Center(child: Text('سجل التعديلات العالمي', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.primaryColor))),
-            const SizedBox(height: 12),
-            if (adjustments.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: Text('لا توجد تعديلات مسجلة', style: TextStyle(color: AppTheme.textSecondary))),
-              )
-            else
-              ...adjustments.map((a) {
-                final diff = a['difference'] as int? ?? 0;
-                final productName = a['product_name'] as String? ?? 'منتج محذوف';
-                return ListTile(
-                  leading: Icon(
-                    diff > 0 ? Icons.add_circle : Icons.remove_circle,
-                    color: diff > 0 ? AppTheme.successColor : AppTheme.errorColor,
-                  ),
-                  title: Text(productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  subtitle: Text(
-                    '${a['old_stock']} ← ${a['new_stock']} (${a['reason']})',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  trailing: Text(
-                    (a['created_at'] as String).substring(0, 16).replaceAll('T', ' '),
-                    style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                  ),
-                );
-              }),
-          ],
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('إدارة المنتجات'),
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(icon: Icon(Icons.add_box), text: 'إضافة منتج'),
-            Tab(icon: Icon(Icons.list_alt), text: 'قائمة المنتجات'),
+    return PopScope(
+      canPop: !_isSelectionMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _isSelectionMode) {
+          setState(() {
+            _isSelectionMode = false;
+            _selectedProductIds.clear();
+          });
+          _selectionAnimController.reverse();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_isSelectionMode
+              ? 'تحديد ${_selectedProductIds.length} منتج'
+              : 'إدارة المنتجات'),
+          bottom: TabBar(
+            controller: _tabController,
+            indicatorColor: Colors.white,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            tabs: const [
+              Tab(icon: Icon(Icons.add_box), text: 'إضافة منتج'),
+              Tab(icon: Icon(Icons.list_alt), text: 'قائمة المنتجات'),
+            ],
+          ),
+          actions: [
+            if (_tabController.index == 1 && _isSelectionMode) ...[
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: () {
+                  setState(() {
+                    _isSelectionMode = false;
+                    _selectedProductIds.clear();
+                  });
+                  _selectionAnimController.reverse();
+                },
+                tooltip: 'إلغاء التحديد',
+              ),
+            ],
           ],
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildAddProductTab(),
-          _buildProductsListTab(),
-        ],
+        body: TabBarView(
+          controller: _tabController,
+          children: [
+            _buildAddProductTab(),
+            _buildProductsListTab(),
+          ],
+        ),
       ),
     );
   }
@@ -771,7 +907,7 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
   }
 
   Widget _buildProductsListTab() {
-    // بحث ذكي بالاسم واللون والقياس
+    // ─── البحث الذكي ───
     List<ProductModel> filteredProducts = _allProducts;
     if (_listSearchQuery.isNotEmpty) {
       final query = _listSearchQuery.toLowerCase();
@@ -782,59 +918,190 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
           final color = p.color.toLowerCase();
           final size = p.size.toLowerCase();
           final barcode = p.barcode.toLowerCase();
+          final secondaryBarcodes = _secondaryBarcodes[p.id] ?? [];
+          final hasMatchingSecondaryBarcode = secondaryBarcodes.any((bc) =>
+            words.every((word) => bc.toLowerCase().contains(word))
+          );
           return words.every((word) =>
             name.contains(word) ||
             color.contains(word) ||
             size.contains(word) ||
             barcode.contains(word)
-          );
+          ) || hasMatchingSecondaryBarcode;
         }).toList();
       }
     }
 
+    // ─── تطبيق الفلاتر ───
+    // فلترة المخزون
+    if (_filterStock.isNotEmpty) {
+      filteredProducts = filteredProducts.where((p) {
+        switch (_filterStock) {
+          case 'zero': return p.stock == 0;
+          case 'low': return p.stock > 0 && p.stock <= 5;
+          case 'medium': return p.stock > 5 && p.stock <= 20;
+          case 'high': return p.stock > 20;
+          default: return true;
+        }
+      }).toList();
+    }
+    // فلترة السعر
+    if (_filterPriceMin != null) {
+      filteredProducts = filteredProducts.where((p) => p.price >= _filterPriceMin!).toList();
+    }
+    if (_filterPriceMax != null) {
+      filteredProducts = filteredProducts.where((p) => p.price <= _filterPriceMax!).toList();
+    }
+    // فلترة الربح
+    if (_filterProfitMin != null) {
+      filteredProducts = filteredProducts.where((p) => (p.price - p.purchasePrice) >= _filterProfitMin!).toList();
+    }
+    if (_filterProfitMax != null) {
+      filteredProducts = filteredProducts.where((p) => (p.price - p.purchasePrice) <= _filterProfitMax!).toList();
+    }
+    // فلترة اللون
+    if (_filterColor.isNotEmpty) {
+      filteredProducts = filteredProducts.where((p) => p.color == _filterColor).toList();
+    }
+    // فلترة القياس
+    if (_filterSize.isNotEmpty) {
+      filteredProducts = filteredProducts.where((p) => p.size == _filterSize).toList();
+    }
+    // فلترة القسم
+    if (_filterCategory.isNotEmpty) {
+      filteredProducts = filteredProducts.where((p) => p.category == _filterCategory).toList();
+    }
+    // فلترة المبيعات
+    if (_filterOnlySold) {
+      filteredProducts = filteredProducts.where((p) =>
+        _productSalesStats.containsKey(p.id) && (_productSalesStats[p.id]!['total_sold'] as int) > 0
+      ).toList();
+    }
+    if (_filterNeverSold) {
+      filteredProducts = filteredProducts.where((p) =>
+        !_productSalesStats.containsKey(p.id) || (_productSalesStats[p.id]!['total_sold'] as int) == 0
+      ).toList();
+    }
+
+    // ─── الترتيب ───
+    filteredProducts.sort((a, b) {
+      int cmp;
+      switch (_sortBy) {
+        case 'price':
+          cmp = a.price.compareTo(b.price);
+          break;
+        case 'stock':
+          cmp = a.stock.compareTo(b.stock);
+          break;
+        case 'profit':
+          cmp = (a.price - a.purchasePrice).compareTo(b.price - b.purchasePrice);
+          break;
+        case 'sold':
+          final aSold = _productSalesStats[a.id]?['total_sold'] ?? 0;
+          final bSold = _productSalesStats[b.id]?['total_sold'] ?? 0;
+          cmp = (aSold as int).compareTo(bSold as int);
+          break;
+        case 'lastSold':
+          final aDate = _productSalesStats[a.id]?['last_sold_date'] ?? '';
+          final bDate = _productSalesStats[b.id]?['last_sold_date'] ?? '';
+          cmp = aDate.compareTo(bDate);
+          break;
+        case 'name':
+        default:
+          cmp = a.name.compareTo(b.name);
+          break;
+      }
+      return _sortAsc ? cmp : -cmp;
+    });
+
+    // ─── جمع القيم الإحصائية ───
+    final totalProducts = filteredProducts.length;
+    final totalStockValue = filteredProducts.fold<int>(0, (sum, p) => sum + (p.price * p.stock));
+    final totalStockQty = filteredProducts.fold<int>(0, (sum, p) => sum + p.stock);
+
     return Column(
       children: [
-        // حقل البحث الذكي
+        // ─── حقل البحث + أزرار الفلتر والترتيب ───
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: TextField(
-            controller: _listScanController,
-            focusNode: _listScanFocusNode,
-            decoration: InputDecoration(
-              labelText: 'بحث بالاسم أو اللون أو القياس أو الباركود',
-              prefixIcon: const Icon(Icons.search, color: AppTheme.primaryColor),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              filled: true,
-              fillColor: AppTheme.searchFieldColor,
-            ),
-            onChanged: (val) => setState(() => _listSearchQuery = val),
-            onSubmitted: _onProductsListScan,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('${filteredProducts.length} منتج في المخزن',
-                  style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.bold)),
-              Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.history, color: AppTheme.warningColor),
-                    onPressed: _showGlobalAdjustmentHistory,
-                    tooltip: 'سجل التعديلات العالمي',
+              Expanded(
+                child: TextField(
+                  controller: _listScanController,
+                  focusNode: _listScanFocusNode,
+                  decoration: InputDecoration(
+                    labelText: 'بحث بالاسم أو اللون أو القياس أو الباركود',
+                    prefixIcon: const Icon(Icons.search, color: AppTheme.primaryColor),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    filled: true,
+                    fillColor: AppTheme.searchFieldColor,
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.refresh, color: AppTheme.primaryColor),
-                    onPressed: _loadAllProducts,
-                    tooltip: 'تحديث',
-                  ),
-                ],
+                  onChanged: (val) => setState(() => _listSearchQuery = val),
+                  onSubmitted: _onProductsListScan,
+                ),
+              ),
+              const SizedBox(width: 8),
+              // زر الفلتر
+              IconButton.filled(
+                onPressed: () => setState(() => _showFilters = !_showFilters),
+                style: IconButton.styleFrom(
+                  backgroundColor: _showFilters ? AppTheme.primaryColor : AppTheme.neutralLightColor,
+                  foregroundColor: _showFilters ? Colors.white : AppTheme.primaryColor,
+                ),
+                icon: Icon(_showFilters ? Icons.filter_list_off : Icons.filter_list),
+                tooltip: 'الفلاتر',
+              ),
+              const SizedBox(width: 4),
+              // زر الترتيب
+              IconButton.filled(
+                onPressed: _showSortDialog,
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.neutralLightColor,
+                  foregroundColor: AppTheme.primaryColor,
+                ),
+                icon: const Icon(Icons.sort),
+                tooltip: 'الترتيب',
               ),
             ],
           ),
         ),
+        // ─── الإحصائيات السريعة ───
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: Row(
+            children: [
+              _buildStatChip('$totalProducts', 'منتج', AppTheme.primaryColor),
+              const SizedBox(width: 6),
+              _buildStatChip('$totalStockQty', 'قطعة', AppTheme.warningColor),
+              const SizedBox(width: 6),
+              _buildStatChip('${totalStockValue.toStringAsFixed(0)} د', 'قيمة', AppTheme.successColor),
+              const Spacer(),
+              GestureDetector(
+                onTap: _showDeleteLog,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.errorColor.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.errorColor.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.delete_sweep, size: 14, color: AppTheme.errorColor),
+                      const SizedBox(width: 4),
+                      const Text('سجل الحذف', style: TextStyle(color: AppTheme.errorColor, fontSize: 11, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // ─── شريط الفلاتر (يظهر/يختفي) ───
+        if (_showFilters) _buildFilterBar(),
+        // ─── قائمة المنتجات ───
         Expanded(
           child: _isLoadingProducts
               ? const Center(child: CircularProgressIndicator())
@@ -858,82 +1125,709 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
                       controller: _listScrollController,
                       itemExtent: 96.0,
                       itemCount: filteredProducts.length,
-                      itemBuilder: (context, index) {
-                        final p = filteredProducts[index];
-                        final profit = p.price - p.purchasePrice;
-                        final isHighlighted = _highlightedProductIndex == index;
-                        return Card(
-                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                          color: isHighlighted ? AppTheme.highlightColor : null,
-                          elevation: isHighlighted ? 4 : 1,
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: p.stock > 0 ? AppTheme.primaryColor : AppTheme.errorColor,
-                              child: Text('${p.stock}',
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                            ),
-                            title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${p.category}${p.color.isNotEmpty ? " | ${p.color}" : ""}${p.size.isNotEmpty ? " | ${p.size}" : ""}',
-                                  style: const TextStyle(fontSize: 12),
+itemBuilder: (context, index) {
+                          final p = filteredProducts[index];
+                          final profit = p.price - p.purchasePrice;
+                          final isHighlighted = _highlightedProductIndex == index;
+                          final isSelected = _selectedProductIds.contains(p.id);
+                          
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? AppTheme.primaryColor.withOpacity(0.05)
+                                  : (isHighlighted ? AppTheme.highlightColor : AppTheme.surfaceColor),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected
+                                    ? AppTheme.primaryColor
+                                    : Colors.grey.withOpacity(0.2),
+                                width: isSelected ? 2.0 : 1.0,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: isSelected
+                                      ? AppTheme.primaryColor.withOpacity(0.15)
+                                      : Colors.black.withOpacity(0.05),
+                                  blurRadius: isSelected ? 8 : 2,
+                                  offset: const Offset(0, 2),
                                 ),
-                                Text(
-                                  'شراء: ${p.purchasePrice} | بيع: ${p.price} | ربح: $profit د',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: profit > 0 ? AppTheme.successColor : AppTheme.errorColor,
-                                    fontWeight: FontWeight.bold,
+                              ],
+                            ),
+                            child: Material(
+                              type: MaterialType.transparency,
+                              child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                              onLongPress: () {
+                                final pid = p.id;
+                                if (pid == null) return;
+                                if (!_isSelectionMode) {
+                                  setState(() {
+                                    _isSelectionMode = true;
+                                    _selectedProductIds.add(pid);
+                                  });
+                                  _selectionAnimController.forward();
+                                } else {
+                                  setState(() {
+                                    if (_selectedProductIds.contains(pid)) {
+                                      _selectedProductIds.remove(pid);
+                                      if (_selectedProductIds.isEmpty) {
+                                        _isSelectionMode = false;
+                                        _selectionAnimController.reverse();
+                                      }
+                                    } else {
+                                      _selectedProductIds.add(pid);
+                                    }
+                                  });
+                                }
+                              },
+                              leading: _isSelectionMode
+                                  ? AnimatedContainer(
+                                      duration: const Duration(milliseconds: 200),
+                                      width: 28,
+                                      height: 28,
+                                      decoration: BoxDecoration(
+                                        color: isSelected ? AppTheme.primaryColor : Colors.transparent,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: isSelected ? AppTheme.primaryColor : Colors.grey.withOpacity(0.4),
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: isSelected
+                                          ? const Icon(Icons.check, color: Colors.white, size: 18)
+                                          : null,
+                                    )
+                                  : CircleAvatar(
+                                      backgroundColor: p.stock > 0
+                                          ? AppTheme.primaryColor.withOpacity(0.15)
+                                          : AppTheme.errorColor.withOpacity(0.15),
+                                      child: Text('${p.stock}',
+                                          style: TextStyle(
+                                            color: p.stock > 0 ? AppTheme.primaryColor : AppTheme.errorColor,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          )),
+                                    ),
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                                   ),
-                                ),
-                              ],
-                            ),
-                            isThreeLine: true,
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.copy, color: AppTheme.primaryColor),
-                                  onPressed: () => _duplicateAsVariant(p),
-                                  tooltip: 'تكرار كـ variant',
-                                ),
-                                IconButton(
-                                  icon: Icon(Icons.print, color: p.barcode.isNotEmpty ? AppTheme.successColor : AppTheme.neutralColor),
-                                  onPressed: p.barcode.isNotEmpty
-                                      ? () => BarcodePrinterWidget.show(context, barcode: p.barcode, productName: p.name, price: p.price)
-                                      : () {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(content: Text('لا يوجد باركود لهذا المنتج!'), backgroundColor: AppTheme.errorColor),
-                                          );
-                                        },
-                                  tooltip: 'طباعة باركود',
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
-                                  onPressed: () => _showEditDialog(p),
-                                  tooltip: 'تعديل',
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.inventory, color: AppTheme.warningColor),
-                                  onPressed: () => _showStockAdjustDialog(p),
-                                  tooltip: 'تصحيح الجرد',
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-                                  onPressed: () => _confirmDelete(p),
-                                  tooltip: 'حذف',
-                                ),
-                              ],
-                            ),
+                                  if (isSelected)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.primaryColor,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        '${_selectedProductIds.length}',
+                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${p.category}${p.color.isNotEmpty ? " | ${p.color}" : ""}${p.size.isNotEmpty ? " | ${p.size}" : ""}',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  Text(
+                                    'شراء: ${p.purchasePrice} | بيع: ${p.price} | ربح: $profit د',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: profit > 0 ? AppTheme.successColor : AppTheme.errorColor,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              isThreeLine: true,
+                              onTap: _isSelectionMode
+                                  ? () {
+                                      final pid = p.id;
+                                      if (pid == null) return;
+                                      setState(() {
+                                        if (_selectedProductIds.contains(pid)) {
+                                          _selectedProductIds.remove(pid);
+                                          if (_selectedProductIds.isEmpty) {
+                                            _isSelectionMode = false;
+                                            _selectionAnimController.reverse();
+                                          }
+                                        } else {
+                                          _selectedProductIds.add(pid);
+                                        }
+                                      });
+                                    }
+                                  : null,
+trailing: _isSelectionMode
+                                  ? const SizedBox.shrink()
+                                  : Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.copy, color: AppTheme.primaryColor),
+                                          onPressed: () => _duplicateAsVariant(p),
+                                          tooltip: 'تكرار كـ variant',
+                                        ),
+                                        IconButton(
+                                          icon: Icon(Icons.print, color: p.barcode.isNotEmpty ? AppTheme.successColor : AppTheme.neutralColor),
+                                          onPressed: p.barcode.isNotEmpty
+                                              ? () => BarcodePrinterWidget.show(context, barcode: p.barcode, productName: p.name, price: p.price)
+                                              : () {
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    const SnackBar(content: Text('لا يوجد باركود لهذا المنتج!'), backgroundColor: AppTheme.errorColor),
+                                                  );
+                                                },
+                                          tooltip: 'طباعة باركود',
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
+                                          onPressed: () => _showEditDialog(p),
+                                          tooltip: 'تعديل',
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.inventory, color: AppTheme.warningColor),
+                                          onPressed: () => _showStockAdjustDialog(p),
+                                          tooltip: 'تصحيح الجرد',
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
+                                          onPressed: () => _confirmDelete(p),
+                                          tooltip: 'حذف',
+                                        ),
+                                       ],
+                                    ),
+                          ),
                           ),
                         );
                       },
                      ),
         ),
+        // ─── شريط التحديد السفلي (Animated) ───
+        AnimatedBuilder(
+          animation: _selectionSlideAnimation,
+          builder: (context, child) {
+            return Transform.translate(
+              offset: Offset(0, (1 - _selectionSlideAnimation.value) * 100),
+              child: Opacity(
+                opacity: _selectionSlideAnimation.value,
+                child: child,
+              ),
+            );
+          },
+          child: _isSelectionMode
+              ? Container(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceColor,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primaryColor.withOpacity(0.1),
+                        blurRadius: 12,
+                        offset: const Offset(0, -4),
+                      ),
+                    ],
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // ─── Header ───
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryColor,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                '${_selectedProductIds.length}',
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'منتج محدد',
+                              style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                            ),
+                            const Spacer(),
+                            TextButton.icon(
+                              icon: const Icon(Icons.close, size: 16),
+                              label: const Text('إلغاء', style: TextStyle(fontSize: 12)),
+                              onPressed: () {
+                                setState(() {
+                                  _isSelectionMode = false;
+                                  _selectedProductIds.clear();
+                                  _bulkQtyController.clear();
+                                });
+                                _selectionAnimController.reverse();
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // ─── Operation Cards ───
+                        Row(
+                          children: [
+                            _buildOperationCard(0, 'إضافة', Icons.add_circle_outline, AppTheme.successColor),
+                            const SizedBox(width: 8),
+                            _buildOperationCard(1, 'خصم', Icons.remove_circle_outline, AppTheme.errorColor),
+                            const SizedBox(width: 8),
+                            _buildOperationCard(2, 'تعيين', Icons.edit_notifications_outlined, AppTheme.primaryColor),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        // ─── Quantity Input + Apply ───
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _bulkQtyController,
+                                keyboardType: TextInputType.number,
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                                decoration: InputDecoration(
+                                  hintText: _bulkOperationType == 0
+                                      ? '+ كمية للإضافة'
+                                      : _bulkOperationType == 1
+                                          ? '- كمية للخصم'
+                                          : '= الكمية الجديدة',
+                                  hintStyle: TextStyle(color: Colors.grey[400], fontSize: 12),
+                                  prefixIcon: Icon(
+                                    _bulkOperationType == 0
+                                        ? Icons.add
+                                        : _bulkOperationType == 1
+                                            ? Icons.remove
+                                            : Icons.drag_handle,
+                                    color: _bulkOperationType == 0
+                                        ? AppTheme.successColor
+                                        : _bulkOperationType == 1
+                                            ? AppTheme.errorColor
+                                            : AppTheme.primaryColor,
+                                    size: 20,
+                                  ),
+                                  filled: true,
+                                  fillColor: AppTheme.neutralLightColor,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            ElevatedButton(
+                              onPressed: () => _applyBulkOperation(),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _bulkOperationType == 0
+                                    ? AppTheme.successColor
+                                    : _bulkOperationType == 1
+                                        ? AppTheme.errorColor
+                                        : AppTheme.primaryColor,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                elevation: 2,
+                              ),
+                              child: const Text('تطبيق', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
       ],
     );
+  }
+
+  // ─── رقاقة إحصائية ───
+  Widget _buildStatChip(String value, String label, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(value, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+            const SizedBox(width: 4),
+            Text(label, style: TextStyle(color: color.withOpacity(0.7), fontSize: 11)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── شريط الفلاتر ───
+  Widget _buildFilterBar() {
+    final colors = _allProducts.map((p) => p.color).where((c) => c.isNotEmpty).toSet().toList()..sort();
+    final sizes = _allProducts.map((p) => p.size).where((s) => s.isNotEmpty).toSet().toList()..sort();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: AppTheme.neutralLightColor,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // فلترة المخزون
+          Row(
+            children: [
+              const Text('المخزون: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              const SizedBox(width: 4),
+              _buildFilterChip('الكل', _filterStock == '', () => setState(() => _filterStock = '')),
+              _buildFilterChip('صفر', _filterStock == 'zero', () => setState(() => _filterStock = 'zero')),
+              _buildFilterChip('قليل ≤5', _filterStock == 'low', () => setState(() => _filterStock = 'low')),
+              _buildFilterChip('متوسط', _filterStock == 'medium', () => setState(() => _filterStock = 'medium')),
+              _buildFilterChip('كثير >20', _filterStock == 'high', () => setState(() => _filterStock = 'high')),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // فلترة السعر والربح
+          Row(
+            children: [
+              const Text('السعر: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              const SizedBox(width: 4),
+              _buildPriceFilterChip('أقل من 10', _filterPriceMax == 10, () {
+                setState(() { _filterPriceMin = null; _filterPriceMax = _filterPriceMax == 10 ? null : 10; });
+              }),
+              _buildPriceFilterChip('10-50', _filterPriceMin == 10 && _filterPriceMax == 50, () {
+                setState(() { _filterPriceMin = 10; _filterPriceMax = 50; });
+              }),
+              _buildPriceFilterChip('50-100', _filterPriceMin == 50 && _filterPriceMax == 100, () {
+                setState(() { _filterPriceMin = 50; _filterPriceMax = 100; });
+              }),
+              _buildPriceFilterChip('أكثر من 100', _filterPriceMin == 100, () {
+                setState(() { _filterPriceMin = _filterPriceMin == 100 ? null : 100; _filterPriceMax = null; });
+              }),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // فلترة اللون والقياس
+          Row(
+            children: [
+              if (colors.isNotEmpty) ...[
+                const Text('اللون: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _buildFilterChip('الكل', _filterColor == '', () => setState(() => _filterColor = '')),
+                        ...colors.map((c) => _buildFilterChip(c, _filterColor == c, () => setState(() => _filterColor = _filterColor == c ? '' : c))),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              if (sizes.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                const Text('القياس: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _buildFilterChip('الكل', _filterSize == '', () => setState(() => _filterSize = '')),
+                        ...sizes.map((s) => _buildFilterChip(s, _filterSize == s, () => setState(() => _filterSize = _filterSize == s ? '' : s))),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          // فلترة المبيعات
+          Row(
+            children: [
+              const Text('المبيعات: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              const SizedBox(width: 4),
+              _buildFilterChip('مباع فقط', _filterOnlySold, () {
+                setState(() { _filterOnlySold = !_filterOnlySold; if (_filterOnlySold) _filterNeverSold = false; });
+              }),
+              _buildFilterChip('لم يُبع', _filterNeverSold, () {
+                setState(() { _filterNeverSold = !_filterNeverSold; if (_filterNeverSold) _filterOnlySold = false; });
+              }),
+              const Spacer(),
+              if (_hasActiveFilters())
+                TextButton.icon(
+                  icon: const Icon(Icons.clear_all, size: 16),
+                  label: const Text('مسح الكل', style: TextStyle(fontSize: 12)),
+                  onPressed: _clearAllFilters,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip(String label, bool isSelected, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: isSelected ? AppTheme.primaryColor : AppTheme.surfaceColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected ? AppTheme.primaryColor : Colors.grey.withOpacity(0.3),
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? Colors.white : AppTheme.textPrimary,
+              fontSize: 11,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPriceFilterChip(String label, bool isSelected, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: isSelected ? AppTheme.successColor : AppTheme.surfaceColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected ? AppTheme.successColor : Colors.grey.withOpacity(0.3),
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? Colors.white : AppTheme.textPrimary,
+              fontSize: 11,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _hasActiveFilters() {
+    return _filterStock.isNotEmpty ||
+        _filterPriceMin != null || _filterPriceMax != null ||
+        _filterProfitMin != null || _filterProfitMax != null ||
+        _filterColor.isNotEmpty || _filterSize.isNotEmpty ||
+        _filterCategory.isNotEmpty ||
+        _filterOnlySold || _filterNeverSold;
+  }
+
+  void _clearAllFilters() {
+    setState(() {
+      _filterStock = '';
+      _filterPriceMin = null;
+      _filterPriceMax = null;
+      _filterProfitMin = null;
+      _filterProfitMax = null;
+      _filterColor = '';
+      _filterSize = '';
+      _filterCategory = '';
+      _filterOnlySold = false;
+      _filterNeverSold = false;
+    });
+  }
+
+  void _showSortDialog() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Container(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('ترتيب المنتجات', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
+              _buildSortOption('name', 'الاسم', Icons.sort_by_alpha, setSheetState),
+              _buildSortOption('price', 'السعر', Icons.attach_money, setSheetState),
+              _buildSortOption('stock', 'المخزون', Icons.inventory, setSheetState),
+              _buildSortOption('profit', 'الربح', Icons.trending_up, setSheetState),
+              _buildSortOption('sold', 'الأكثر مبيعاً', Icons.star, setSheetState),
+              _buildSortOption('lastSold', 'آخر بيع', Icons.access_time, setSheetState),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Text('الاتجاه: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('تصاعدي ↑', style: TextStyle(fontSize: 12)),
+                    selected: _sortAsc,
+                    onSelected: (_) => setSheetState(() => _sortAsc = true),
+                    selectedColor: AppTheme.primaryColor.withOpacity(0.2),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('تنازلي ↓', style: TextStyle(fontSize: 12)),
+                    selected: !_sortAsc,
+                    onSelected: (_) => setSheetState(() => _sortAsc = false),
+                    selectedColor: AppTheme.primaryColor.withOpacity(0.2),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ).then((_) => setState(() {}));
+  }
+
+  Widget _buildSortOption(String value, String label, IconData icon, StateSetter setSheetState) {
+    final isSelected = _sortBy == value;
+    return ListTile(
+      dense: true,
+      leading: Icon(icon, color: isSelected ? AppTheme.primaryColor : AppTheme.textSecondary, size: 20),
+      title: Text(label, style: TextStyle(
+        color: isSelected ? AppTheme.primaryColor : AppTheme.textPrimary,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+      )),
+      trailing: isSelected ? Icon(Icons.check_circle, color: AppTheme.primaryColor, size: 20) : null,
+      onTap: () {
+        setSheetState(() {
+          if (_sortBy == value) {
+            _sortAsc = !_sortAsc;
+          } else {
+            _sortBy = value;
+            _sortAsc = true;
+          }
+        });
+        setState(() {});
+      },
+    );
+  }
+
+  // ─── بطاقة العملية ───
+  Widget _buildOperationCard(int type, String label, IconData icon, Color color) {
+    final isSelected = _bulkOperationType == type;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _bulkOperationType = type),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? color.withOpacity(0.1) : AppTheme.neutralLightColor,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSelected ? color : Colors.grey.withOpacity(0.2),
+              width: isSelected ? 1.5 : 1,
+            ),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: color, size: 22),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? color : AppTheme.textSecondary,
+                  fontSize: 11,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─── العملية المجمعة ───
+  Future<void> _applyBulkOperation() async {
+    final qty = int.tryParse(_bulkQtyController.text);
+    if (qty == null || qty <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('أدخل كمية صحيحة أكبر من صفر'), backgroundColor: AppTheme.errorColor),
+      );
+      return;
+    }
+    if (_selectedProductIds.isEmpty) return;
+
+    final opName = _bulkOperationType == 0 ? 'إضافة' : _bulkOperationType == 1 ? 'خصم' : 'تعيين';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('تأكيد $opName $qty', style: TextStyle(color: AppTheme.primaryColor)),
+        content: Text('سيتم $opName $qty على ${_selectedProductIds.length} منتج محدد.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('تطبيق'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final db = await DatabaseHelper.instance.database;
+      await db.transaction((txn) async {
+        for (final id in _selectedProductIds) {
+          final rows = await txn.query('products', columns: ['stock'], where: 'id = ?', whereArgs: [id]);
+          if (rows.isEmpty) continue;
+          final currentStock = (rows.first['stock'] as int?) ?? 0;
+          int newStock;
+          switch (_bulkOperationType) {
+            case 0:
+              newStock = currentStock + qty;
+              break;
+            case 1:
+              newStock = (currentStock - qty).clamp(0, 999999);
+              break;
+            default:
+              newStock = qty;
+          }
+          await txn.update('products', {'stock': newStock}, where: 'id = ?', whereArgs: [id]);
+        }
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تم $opName $qty على ${_selectedProductIds.length} منتج'), backgroundColor: AppTheme.successColor),
+        );
+        _selectedProductIds.clear();
+        _isSelectionMode = false;
+        _bulkQtyController.clear();
+        _loadAllProducts();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
+        );
+      }
+    }
   }
 
   // ─── حوار تصحيح الجرد ───
@@ -1075,6 +1969,210 @@ class _ProductsPageState extends State<ProductsPage> with SingleTickerProviderSt
         ],
       ),
     );
+  }
+}
+
+// ─── واجهة سجل الحذف ───
+class _DeleteLogSheet extends StatefulWidget {
+  final ScrollController scrollController;
+  const _DeleteLogSheet({required this.scrollController});
+
+  @override
+  State<_DeleteLogSheet> createState() => _DeleteLogSheetState();
+}
+
+class _DeleteLogSheetState extends State<_DeleteLogSheet> {
+  List<Map<String, dynamic>> _logs = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLogs();
+  }
+
+  Future<void> _loadLogs() async {
+    setState(() => _isLoading = true);
+    final logs = await DatabaseHelper.instance.getDeleteLog(limit: 200);
+    if (mounted) setState(() { _logs = logs; _isLoading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceColor,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            width: 40, height: 4,
+            decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Icon(Icons.delete_sweep, color: AppTheme.errorColor, size: 24),
+                const SizedBox(width: 8),
+                const Text('سجل الحذف', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                const Spacer(),
+                Text('${_logs.length} منتج محذوف', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _logs.isEmpty
+                    ? const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.check_circle_outline, color: AppTheme.successColor, size: 48),
+                            SizedBox(height: 8),
+                            Text('لا توجد منتجات محذوفة', style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: widget.scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        itemCount: _logs.length,
+                        itemBuilder: (ctx, index) {
+                          final log = _logs[index];
+                          final profit = ((log['price'] ?? 0) as int) - ((log['purchase_price'] ?? 0) as int);
+                          final deletedAt = (log['deleted_at'] as String).substring(0, 16).replaceAll('T', ' ');
+                          return Card(
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(child: Text(log['product_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
+                                      PopupMenuButton<String>(
+                                        onSelected: (action) => _handleLogAction(action, log),
+                                        itemBuilder: (ctx) => [
+                                          const PopupMenuItem(value: 'restore', child: Row(
+                                            children: [Icon(Icons.restore, color: AppTheme.successColor, size: 18), SizedBox(width: 8), Text('استرجاع')],
+                                          )),
+                                          const PopupMenuItem(value: 'permanent', child: Row(
+                                            children: [Icon(Icons.delete_forever, color: AppTheme.errorColor, size: 18), SizedBox(width: 8), Text('حذف نهائي')],
+                                          )),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Wrap(
+                                    spacing: 8, runSpacing: 2,
+                                    children: [
+                                      if ((log['category'] as String?)?.isNotEmpty == true) _logChip(Icons.category, log['category']),
+                                      if ((log['color'] as String?)?.isNotEmpty == true) _logChip(Icons.palette, log['color']),
+                                      if ((log['size'] as String?)?.isNotEmpty == true) _logChip(Icons.straighten, log['size']),
+                                      _logChip(Icons.attach_money, '${log['price'] ?? 0} د'),
+                                      _logChip(Icons.inventory, '${log['stock'] ?? 0} قطعة'),
+                                      if (profit > 0) _logChip(Icons.trending_up, '$profit ربح', color: AppTheme.successColor),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.access_time, size: 12, color: AppTheme.textSecondary),
+                                      const SizedBox(width: 4),
+                                      Text(deletedAt, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                                      const Spacer(),
+                                      if ((log['barcode'] as String?)?.isNotEmpty == true)
+                                        Text('باركود: ${log['barcode']}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _logChip(IconData icon, String label, {Color? color}) {
+    return Chip(
+      avatar: Icon(icon, size: 14, color: color ?? AppTheme.primaryColor),
+      label: Text(label, style: TextStyle(fontSize: 11, color: color ?? AppTheme.textPrimary)),
+      padding: EdgeInsets.zero,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  Future<void> _handleLogAction(String action, Map<String, dynamic> log) async {
+    if (action == 'restore') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('استرجاع المنتج', style: TextStyle(color: AppTheme.successColor)),
+          content: Text('هل تريد استرجاع "${log['product_name']}"؟\nسيعود للقائمة مع كل بياناته.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('استرجاع'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) {
+        final success = await DatabaseHelper.instance.restoreFromDeleteLog(log['id'] as int);
+        if (mounted) {
+          if (success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('تم استرجاع "${log['product_name']}" بنجاح'), backgroundColor: AppTheme.successColor),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('فشل الاسترجاع — المنتج قد يكون موجوداً بالفعل'), backgroundColor: AppTheme.errorColor),
+            );
+          }
+          _loadLogs();
+        }
+      }
+    } else if (action == 'permanent') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('حذف نهائي', style: TextStyle(color: AppTheme.errorColor)),
+          content: Text('هل تريد حذف "${log['product_name']}" نهائياً؟\nلا يمكن التراجع عن هذا الإجراء.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('حذف نهائي'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) {
+        await DatabaseHelper.instance.permanentDeleteLog(log['id'] as int);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تم الحذف نهائيًا'), backgroundColor: AppTheme.errorColor),
+          );
+          _loadLogs();
+        }
+      }
+    }
   }
 }
 

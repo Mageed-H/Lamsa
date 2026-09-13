@@ -79,7 +79,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 14, // الإصدار 14: رقم الوصل
+      version: 15, // الإصدار 15: سجل الحذف والاسترجاع
       onConfigure: _onConfigure, // مفتاح التشفير + العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -448,6 +448,7 @@ class DatabaseHelper {
     await _createV12Tables(db);
     await _createV13Tables(db);
     await _createV14Tables(db);
+    await _createV15Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -495,6 +496,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 14) {
       await _createV14Tables(db);
+    }
+    if (oldVersion < 15) {
+      await _createV15Tables(db);
     }
   }
 
@@ -770,6 +774,122 @@ class DatabaseHelper {
     } catch (e) {
       print('Error deleting product: $e');
       return 0;
+    }
+  }
+
+  /// حذف منتج مع تسجيله في سجل الحذف (يمكن استرجاعه لاحقاً)
+  Future<bool> deleteProductWithLog(int id, {String deletedBy = 'user'}) async {
+    try {
+      final db = await instance.database;
+      return await db.transaction((txn) async {
+        // 1. جلب بيانات المنتج قبل الحذف
+        final rows = await txn.query('products', where: 'id = ?', whereArgs: [id]);
+        if (rows.isEmpty) return false;
+        final p = rows.first;
+
+        // 2. جلب الباركودات الثانوية
+        final barcodeRows = await txn.query('product_barcodes', where: 'product_id = ?', whereArgs: [id]);
+        final extraBarcodes = barcodeRows.map((r) => r['barcode'] as String).join(',');
+
+        // 3. تسجيل في سجل الحذف
+        await txn.insert('delete_log', {
+          'product_id': id,
+          'product_name': p['name'],
+          'category': p['category'],
+          'color': p['color'],
+          'size': p['size'],
+          'price': p['price'],
+          'purchase_price': p['purchase_price'],
+          'stock': p['stock'],
+          'barcode': p['barcode'],
+          'extra_barcodes': extraBarcodes,
+          'deleted_at': DateTime.now().toIso8601String(),
+          'deleted_by': deletedBy,
+        });
+
+        // 4. حذف الباركودات الثانوية
+        await txn.delete('product_barcodes', where: 'product_id = ?', whereArgs: [id]);
+
+        // 5. حذف المنتج
+        await txn.delete('products', where: 'id = ?', whereArgs: [id]);
+
+        return true;
+      });
+    } catch (e) {
+      print('Error deleting product with log: $e');
+      return false;
+    }
+  }
+
+  /// جلب سجل الحذف
+  Future<List<Map<String, dynamic>>> getDeleteLog({int limit = 100}) async {
+    try {
+      final db = await instance.database;
+      return await db.query('delete_log', orderBy: 'deleted_at DESC', limit: limit);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// استرجاع منتج من سجل الحذف
+  Future<bool> restoreFromDeleteLog(int logId) async {
+    try {
+      final db = await instance.database;
+      return await db.transaction((txn) async {
+        // 1. جلب بيانات السجل
+        final rows = await txn.query('delete_log', where: 'id = ?', whereArgs: [logId]);
+        if (rows.isEmpty) return false;
+        final log = rows.first;
+
+        // 2. التحقق أن المنتج لم يعد موجوداً
+        final existing = await txn.query('products', where: 'id = ?', whereArgs: [log['product_id']]);
+        if (existing.isNotEmpty) return false;
+
+        // 3. إعادة إدخال المنتج
+        await txn.insert('products', {
+          'id': log['product_id'],
+          'name': log['product_name'],
+          'category': log['category'],
+          'color': log['color'] ?? '',
+          'size': log['size'] ?? '',
+          'price': log['price'] ?? 0,
+          'purchase_price': log['purchase_price'] ?? 0,
+          'stock': log['stock'] ?? 0,
+          'barcode': log['barcode'] ?? '',
+        });
+
+        // 4. إعادة الباركودات الثانوية
+        final extraBarcodes = (log['extra_barcodes'] as String?) ?? '';
+        if (extraBarcodes.isNotEmpty) {
+          for (final bc in extraBarcodes.split(',')) {
+            if (bc.trim().isNotEmpty) {
+              await txn.insert('product_barcodes', {
+                'product_id': log['product_id'],
+                'barcode': bc.trim(),
+              });
+            }
+          }
+        }
+
+        // 5. حذف السجل
+        await txn.delete('delete_log', where: 'id = ?', whereArgs: [logId]);
+
+        return true;
+      });
+    } catch (e) {
+      print('Error restoring from delete log: $e');
+      return false;
+    }
+  }
+
+  /// حذف سجل نهائياً (لا يمكن التراجع)
+  Future<bool> permanentDeleteLog(int logId) async {
+    try {
+      final db = await instance.database;
+      final rows = await db.delete('delete_log', where: 'id = ?', whereArgs: [logId]);
+      return rows > 0;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -1316,11 +1436,33 @@ class DatabaseHelper {
 
   Future _createV14Tables(Database db) async {
     try { await db.execute('ALTER TABLE sales ADD COLUMN receipt_number TEXT'); } catch (_) {}
-    // ترقيم الفواتور القديمة
+    // ترقيم الفواتير القديمة
     await db.rawUpdate('''
       UPDATE sales SET receipt_number = 'R' || id WHERE receipt_number IS NULL
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_sales_receipt ON sales (receipt_number);');
+  }
+
+  Future _createV15Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS delete_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL,
+        category TEXT,
+        color TEXT,
+        size TEXT,
+        price INTEGER,
+        purchase_price INTEGER,
+        stock INTEGER,
+        barcode TEXT,
+        extra_barcodes TEXT,
+        deleted_at TEXT NOT NULL,
+        deleted_by TEXT DEFAULT 'user'
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_dl_product ON delete_log (product_id);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_dl_date ON delete_log (deleted_at);');
   }
 
   /// تصحيح جرد منتج يدوياً مع تسجيل السبب
@@ -1521,8 +1663,113 @@ class DatabaseHelper {
   }
 
   // ==========================================================
+  // دوال إحصائيات المبيعات (Sales Stats for Products Filtering)
+  // ==========================================================
+
+  /// جلب إحصائيات المبيعات لكل منتج (الكمية المباعة، إجمالي الإيراد، آخر تاريخ بيع)
+  Future<Map<int, Map<String, dynamic>>> getProductSalesStats() async {
+    try {
+      final db = await instance.database;
+      final rows = await db.rawQuery('''
+        SELECT 
+          product_id,
+          SUM(quantity) as total_sold,
+          SUM(quantity * unit_price) as total_revenue,
+          MAX(s.created_at) as last_sold_date
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        GROUP BY product_id
+      ''');
+      final Map<int, Map<String, dynamic>> map = {};
+      for (final r in rows) {
+        map[r['product_id'] as int] = {
+          'total_sold': r['total_sold'] ?? 0,
+          'total_revenue': r['total_revenue'] ?? 0,
+          'last_sold_date': r['last_sold_date'] ?? '',
+        };
+      }
+      return map;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /// جلب أعلى المنتجات مبيعاً
+  Future<List<Map<String, dynamic>>> getTopSellingProducts({int limit = 10}) async {
+    try {
+      final db = await instance.database;
+      return await db.rawQuery('''
+        SELECT 
+          si.product_id,
+          p.name,
+          SUM(si.quantity) as total_sold,
+          SUM(si.quantity * si.unit_price) as total_revenue,
+          SUM(si.quantity * (si.unit_price - si.purchase_price)) as total_profit
+        FROM sale_items si
+        JOIN products p ON p.id = si.product_id
+        GROUP BY si.product_id
+        ORDER BY total_sold DESC
+        LIMIT ?
+      ''', [limit]);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// جلب إحصائيات المبيعات العامة (من تاريخ إلى تاريخ)
+  Future<Map<String, dynamic>> getGeneralSalesStats({String? startDate, String? endDate}) async {
+    try {
+      final db = await instance.database;
+      String where = '';
+      List<dynamic> args = [];
+      if (startDate != null && endDate != null) {
+        where = 'WHERE created_at BETWEEN ? AND ?';
+        args = [startDate, endDate];
+      } else if (startDate != null) {
+        where = 'WHERE created_at >= ?';
+        args = [startDate];
+      }
+      final rows = await db.rawQuery('''
+        SELECT 
+          COUNT(*) as total_sales,
+          COALESCE(SUM(total_amount), 0) as total_revenue,
+          COALESCE(SUM(total_profit), 0) as total_profit,
+          COALESCE(SUM(items_count), 0) as total_items
+        FROM sales $where
+      ''', args);
+      if (rows.isNotEmpty) {
+        return rows.first;
+      }
+      return {'total_sales': 0, 'total_revenue': 0, 'total_profit': 0, 'total_items': 0};
+    } catch (e) {
+      return {'total_sales': 0, 'total_revenue': 0, 'total_profit': 0, 'total_items': 0};
+    }
+  }
+
+  // ==========================================================
   // دوال الديون (Debts CRUD)
   // ==========================================================
+
+  /// جلب قائمة العملاء whom عندهم ديون (فريد)
+  Future<List<Map<String, dynamic>>> getDebtCustomers() async {
+    try {
+      final db = await instance.database;
+      return await db.rawQuery('''
+        SELECT 
+          customer_name,
+          phone,
+          SUM(amount) as total_debt,
+          SUM(paid) as total_paid,
+          SUM(amount - paid) as remaining
+        FROM debts
+        GROUP BY customer_name
+        HAVING remaining > 0
+        ORDER BY customer_name
+      ''');
+    } catch (e) {
+      return [];
+    }
+  }
 
   /// إضافة دين جديد
   Future<int> insertDebt({

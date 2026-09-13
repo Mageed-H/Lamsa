@@ -53,6 +53,7 @@ class _PosPageState extends State<PosPage> {
   int _lastPrintGiven = 0;
   int _lastPrintChange = 0;
   int? _lastPrintSaleId;
+  String? _lastPrintCustomerName;
   // تصفية المنتجات
   String? _posSelectedCategory;
   // بحث بالاسم/اللون/القياس
@@ -598,6 +599,263 @@ class _PosPageState extends State<PosPage> {
     ).then((_) => _keepFocus());
   }
 
+  // حوار بيع بالدين: اختيار عميل + إنشاء الدين
+  Future<void> _showDebtSaleDialog() async {
+    if (_cart.isEmpty) return;
+
+    final int total = _finalTotal;
+    final int discountVal = _discountValue;
+    final customers = await DatabaseHelper.instance.getDebtCustomers();
+    String searchQuery = '';
+    String? selectedCustomer;
+    String? selectedPhone;
+    final newCustomerController = TextEditingController();
+    final newPhoneController = TextEditingController();
+    bool useNewCustomer = false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final filteredCustomers = customers.where((c) {
+            if (searchQuery.isEmpty) return true;
+            final name = (c['customer_name'] as String).toLowerCase();
+            final phone = (c['phone'] as String?)?.toLowerCase() ?? '';
+            return name.contains(searchQuery.toLowerCase()) || phone.contains(searchQuery.toLowerCase());
+          }).toList();
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                const Icon(Icons.person_add_outlined, color: AppTheme.primaryColor),
+                const SizedBox(width: 8),
+                const Text('بيع بالدين', style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            content: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // المبلغ
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryColor.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('المبلغ المستحق:', style: TextStyle(fontSize: 14)),
+                        Text('$total دينار', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // التبديل بين عميل موجود / عميل جديد
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text('عميل موجود', style: TextStyle(fontSize: 12)),
+                        selected: !useNewCustomer,
+                        onSelected: (_) => setDialogState(() => useNewCustomer = false),
+                        selectedColor: AppTheme.primaryColor.withOpacity(0.2),
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('عميل جديد', style: TextStyle(fontSize: 12)),
+                        selected: useNewCustomer,
+                        onSelected: (_) => setDialogState(() => useNewCustomer = true),
+                        selectedColor: AppTheme.primaryColor.withOpacity(0.2),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (!useNewCustomer) ...[
+                    // بحث
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'بحث بالاسم أو رقم الهاتف...',
+                        prefixIcon: const Icon(Icons.search, size: 18),
+                        isDense: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onChanged: (v) => setDialogState(() => searchQuery = v),
+                    ),
+                    const SizedBox(height: 8),
+                    // قائمة العملاء
+                    if (filteredCustomers.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Center(child: Text('لا يوجد عملاء', style: TextStyle(color: AppTheme.textSecondary))),
+                      )
+                    else
+                      SizedBox(
+                        height: 200,
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: filteredCustomers.length,
+                          itemBuilder: (ctx, i) {
+                            final c = filteredCustomers[i];
+                            final name = c['customer_name'] as String;
+                            final phone = (c['phone'] as String?) ?? '';
+                            final remaining = c['remaining'] as int;
+                            final isSelected = selectedCustomer == name;
+                            return ListTile(
+                              dense: true,
+                              selected: isSelected,
+                              selectedTileColor: AppTheme.primaryColor.withOpacity(0.1),
+                              leading: CircleAvatar(
+                                backgroundColor: isSelected ? AppTheme.primaryColor : AppTheme.neutralLightColor,
+                                child: Text(name[0], style: TextStyle(color: isSelected ? Colors.white : AppTheme.textPrimary, fontWeight: FontWeight.bold)),
+                              ),
+                              title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                              subtitle: Text(phone.isNotEmpty ? phone : 'بدون هاتف', style: const TextStyle(fontSize: 11)),
+                              trailing: Text('$remaining د', style: const TextStyle(color: AppTheme.errorColor, fontSize: 12, fontWeight: FontWeight.bold)),
+                              onTap: () => setDialogState(() {
+                                selectedCustomer = name;
+                                selectedPhone = phone;
+                              }),
+                            );
+                          },
+                        ),
+                      ),
+                  ] else ...[
+                    // عميل جديد
+                    TextField(
+                      controller: newCustomerController,
+                      decoration: InputDecoration(
+                        labelText: 'اسم العميل *',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: newPhoneController,
+                      decoration: InputDecoration(
+                        labelText: 'رقم الهاتف (اختياري)',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        isDense: true,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('إلغاء'),
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.check, size: 18),
+                label: const Text('تأكيد البيع بالدين'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+                onPressed: () {
+                  if (useNewCustomer) {
+                    if (newCustomerController.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('أدخل اسم العميل'), backgroundColor: AppTheme.errorColor),
+                      );
+                      return;
+                    }
+                    selectedCustomer = newCustomerController.text.trim();
+                    selectedPhone = newPhoneController.text.trim();
+                  }
+                  if (selectedCustomer == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('اختر عميل أو أدخل اسم جديد'), backgroundColor: AppTheme.errorColor),
+                    );
+                    return;
+                  }
+                  Navigator.pop(ctx, true);
+                },
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed != true || !mounted) {
+      newCustomerController.dispose();
+      newPhoneController.dispose();
+      _keepFocus();
+      return;
+  }
+
+    // تنفيذ البيع بالدين
+    try {
+      final cartSnapshot = List<Map<String, dynamic>>.from(_cart);
+      final saleId = await DatabaseHelper.instance.completeSale(_cart, discountValue: discountVal);
+
+      if (saleId > 0) {
+        // إنشاء الدين مرتبط بالفاتورة
+        await DatabaseHelper.instance.insertDebt(
+          customerName: selectedCustomer!,
+          phone: selectedPhone?.isNotEmpty == true ? selectedPhone : null,
+          amount: total,
+          note: 'فاتورة #$saleId',
+          saleId: saleId,
+        );
+
+        if (mounted) {
+          _lastPrintCart = cartSnapshot;
+          _lastPrintSubtotal = _subtotal;
+          _lastPrintDiscount = _discountValue;
+          _lastPrintTotal = total;
+          _lastPrintGiven = 0;
+          _lastPrintChange = 0;
+          _lastPrintSaleId = saleId;
+          _lastPrintCustomerName = selectedCustomer;
+          setState(() {
+            _cart.clear();
+            _discountAmount = 0;
+            _isDiscountPercent = false;
+          });
+
+          // طباعة الفاتورة
+          try {
+            await _printInvoice(cartSnapshot, _subtotal, _discountValue, total, 0, 0, saleId: saleId, customerName: selectedCustomer);
+          } catch (e, st) {
+            await ErrorLogger.instance.logError(e, st, context: 'طباعة فاتورة دين');
+          }
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('تم البيع بالدين ✓ | العميل: $selectedCustomer | المبلغ: $total د'),
+              backgroundColor: AppTheme.primaryColor,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('حدث خطأ أثناء إتمام البيع!'), backgroundColor: AppTheme.errorColor),
+        );
+      }
+    } catch (e, st) {
+      await ErrorLogger.instance.logError(e, st, context: 'بيع بالدين');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
+        );
+      }
+    }
+    newCustomerController.dispose();
+    newPhoneController.dispose();
+    _keepFocus();
+  }
+
   // حوار الدفع: حساب الفكة + اختيار الطباعة
   Future<void> _showPaymentDialog() async {
     if (_cart.isEmpty) return;
@@ -898,7 +1156,7 @@ class _PosPageState extends State<PosPage> {
     int finalTotal,
     int given,
     int change,
-    {int? saleId}
+    {int? saleId, String? customerName}
   ) async {
     final settings = await DatabaseHelper.instance.getAllSettings();
     final storeName = settings['store_name'] ?? 'أحلى الحلوين';
@@ -1108,6 +1366,18 @@ class _PosPageState extends State<PosPage> {
               if (saleId != null) ...[
                 pw.SizedBox(height: 2),
                 pw.Text('رقم الوصل: R${saleId.toString().padLeft(6, '0')}', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+              ],
+              // اسم العميل (إذا كان بيع بالدين)
+              if (customerName != null && customerName.isNotEmpty) ...[
+                pw.SizedBox(height: 2),
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.pink50,
+                    borderRadius: pw.BorderRadius.circular(4),
+                  ),
+                  child: pw.Text('العميل: $customerName', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+                ),
               ],
               solidDiv,
               pw.SizedBox(height: 2),
@@ -1747,7 +2017,7 @@ class _PosPageState extends State<PosPage> {
                   await _printInvoice(
                     _lastPrintCart!, _lastPrintSubtotal, _lastPrintDiscount,
                     _lastPrintTotal, _lastPrintGiven, _lastPrintChange,
-                    saleId: _lastPrintSaleId,
+                    saleId: _lastPrintSaleId, customerName: _lastPrintCustomerName,
                   );
                 } catch (e, st) {
                   await ErrorLogger.instance.logError(e, st, context: 'إعادة طباعة آخر فاتورة');
@@ -2007,6 +2277,8 @@ class _PosPageState extends State<PosPage> {
                               _posActionBtn(Icons.discount_outlined, _discountValue > 0 ? AppTheme.errorColor : AppTheme.textSecondary, _showDiscountDialog),
                               const SizedBox(width: 4),
                               _posActionBtn(Icons.pause_circle_filled, AppTheme.warningColor, _suspendOrder),
+                              const SizedBox(width: 4),
+                              _posActionBtn(Icons.person_add_outlined, AppTheme.primaryColor, _showDebtSaleDialog),
                               const SizedBox(width: 4),
                               Expanded(
                                 child: ElevatedButton.icon(
