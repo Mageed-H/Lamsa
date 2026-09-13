@@ -1509,8 +1509,8 @@ trailing: _isSelectionMode
                                         hintText: _bulkPriceMode == 2
                                             ? 'سعر البيع الجديد'
                                             : _bulkPriceMode == 0
-                                                ? '+ % زيادة على البيع'
-                                                : '- % خصم من البيع',
+                                                ? '+ مبلغ الزيادة على البيع'
+                                                : '- مبلغ الخصم من البيع',
                                         hintStyle: TextStyle(color: Colors.grey[400], fontSize: 11),
                                         prefixIcon: Icon(
                                           _bulkPriceMode == 0
@@ -1538,8 +1538,8 @@ trailing: _isSelectionMode
                                         hintText: _bulkPriceMode == 2
                                             ? 'سعر الشراء الجديد'
                                             : _bulkPriceMode == 0
-                                                ? '+ % زيادة على الشراء'
-                                                : '- % خصم من الشراء',
+                                                ? '+ مبلغ الزيادة على الشراء'
+                                                : '- مبلغ الخصم من الشراء',
                                         hintStyle: TextStyle(color: Colors.grey[400], fontSize: 11),
                                         prefixIcon: Icon(
                                           _bulkPriceMode == 0
@@ -1574,9 +1574,9 @@ trailing: _isSelectionMode
                                   ),
                                   label: Text(
                                     _bulkPriceMode == 0
-                                        ? 'زيادة % على ${_selectedProductIds.length} منتج'
+                                        ? 'زيادة على ${_selectedProductIds.length} منتج'
                                         : _bulkPriceMode == 1
-                                            ? 'خصم % من ${_selectedProductIds.length} منتج'
+                                            ? 'خصم من ${_selectedProductIds.length} منتج'
                                             : 'تعيين سعر ثابت لـ ${_selectedProductIds.length} منتج',
                                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                   ),
@@ -2139,10 +2139,10 @@ trailing: _isSelectionMode
         );
         return;
       }
-      final modeLabel = _bulkPriceMode == 0 ? 'زيادة %' : _bulkPriceMode == 1 ? 'خصم %' : 'سعر ثابت';
+      final modeLabel = _bulkPriceMode == 0 ? 'زيادة' : _bulkPriceMode == 1 ? 'خصم' : 'سعر ثابت';
       final parts = <String>[];
-      if (sellValue != null) parts.add('البيع ($sellValue${_bulkPriceMode <= 1 ? '%' : ''})');
-      if (buyValue != null) parts.add('الشراء ($buyValue${_bulkPriceMode <= 1 ? '%' : ''})');
+      if (sellValue != null) parts.add('البيع ($sellValue د.ع)');
+      if (buyValue != null) parts.add('الشراء ($buyValue د.ع)');
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -2170,15 +2170,15 @@ trailing: _isSelectionMode
             final updates = <String, dynamic>{};
             if (sellValue != null) {
               switch (_bulkPriceMode) {
-                case 0: updates['sell_price'] = (currentSell * (1 + sellValue / 100)).roundToDouble(); break;
-                case 1: updates['sell_price'] = (currentSell * (1 - sellValue / 100)).clamp(0, 999999999).roundToDouble(); break;
+                case 0: updates['sell_price'] = currentSell + sellValue; break;
+                case 1: updates['sell_price'] = (currentSell - sellValue).clamp(0.0, 999999999.0); break;
                 default: updates['sell_price'] = sellValue;
               }
             }
             if (buyValue != null) {
               switch (_bulkPriceMode) {
-                case 0: updates['purchase_price'] = (currentBuy * (1 + buyValue / 100)).roundToDouble(); break;
-                case 1: updates['purchase_price'] = (currentBuy * (1 - buyValue / 100)).clamp(0, 999999999).roundToDouble(); break;
+                case 0: updates['purchase_price'] = currentBuy + buyValue; break;
+                case 1: updates['purchase_price'] = (currentBuy - buyValue).clamp(0.0, 999999999.0); break;
                 default: updates['purchase_price'] = buyValue;
               }
             }
