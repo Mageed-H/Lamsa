@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/core/widgets/custom_button.dart';
@@ -114,7 +115,7 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
       if (_tabController.indexIsChanging) return;
       if (_tabController.index == 0) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _barcodeFocusNode.requestFocus();
+          if (mounted) _nameFocusNode.requestFocus();
         });
       } else if (_tabController.index == 1) {
         _loadAllProducts();
@@ -125,8 +126,9 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
     });
     _loadCategories();
     _loadAllProducts();
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _barcodeFocusNode.requestFocus();
+      if (mounted) _nameFocusNode.requestFocus();
     });
   }
 
@@ -135,6 +137,7 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
     _tabController.dispose();
     _selectionAnimController.dispose();
     DatabaseHelper.productsRevision.removeListener(_loadAllProducts);
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     _nameController.dispose();
     _colorController.dispose();
     _sizeController.dispose();
@@ -583,6 +586,17 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
         ],
       ),
     );
+  }
+
+  // ─── اختصار Ctrl+R لاسترجاع آخر منتج ───
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final kb = HardwareKeyboard.instance;
+    if (kb.isControlPressed && event.logicalKey == LogicalKeyboardKey.keyR) {
+      _restoreLastProduct();
+      return true;
+    }
+    return false;
   }
 
   // ─── سجل الحذف والاسترجاع ───
@@ -1377,69 +1391,116 @@ trailing: _isSelectionMode
                         Row(
                           children: [
                             _buildOperationCard(0, 'إضافة', Icons.add_circle_outline, AppTheme.successColor),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
                             _buildOperationCard(1, 'خصم', Icons.remove_circle_outline, AppTheme.errorColor),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
                             _buildOperationCard(2, 'تعيين', Icons.edit_notifications_outlined, AppTheme.primaryColor),
                           ],
                         ),
-                        const SizedBox(height: 10),
-                        // ─── Quantity Input + Apply ───
+                        const SizedBox(height: 6),
                         Row(
                           children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _bulkQtyController,
-                                keyboardType: TextInputType.number,
-                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                                decoration: InputDecoration(
-                                  hintText: _bulkOperationType == 0
-                                      ? '+ كمية للإضافة'
-                                      : _bulkOperationType == 1
-                                          ? '- كمية للخصم'
-                                          : '= الكمية الجديدة',
-                                  hintStyle: TextStyle(color: Colors.grey[400], fontSize: 12),
-                                  prefixIcon: Icon(
-                                    _bulkOperationType == 0
-                                        ? Icons.add
-                                        : _bulkOperationType == 1
-                                            ? Icons.remove
-                                            : Icons.drag_handle,
-                                    color: _bulkOperationType == 0
-                                        ? AppTheme.successColor
-                                        : _bulkOperationType == 1
-                                            ? AppTheme.errorColor
-                                            : AppTheme.primaryColor,
-                                    size: 20,
-                                  ),
-                                  filled: true,
-                                  fillColor: AppTheme.neutralLightColor,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            ElevatedButton(
-                              onPressed: () => _applyBulkOperation(),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _bulkOperationType == 0
-                                    ? AppTheme.successColor
-                                    : _bulkOperationType == 1
-                                        ? AppTheme.errorColor
-                                        : AppTheme.primaryColor,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                elevation: 2,
-                              ),
-                              child: const Text('تطبيق', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                            ),
+                            _buildOperationCard(3, 'حذف', Icons.delete_outline, AppTheme.errorColor),
+                            const SizedBox(width: 6),
+                            _buildOperationCard(4, 'القسم', Icons.category_outlined, AppTheme.warningColor),
+                            const SizedBox(width: 6),
+                            _buildOperationCard(5, 'اللون', Icons.palette_outlined, AppTheme.primaryColor),
                           ],
                         ),
+                        const SizedBox(height: 8),
+                        // ─── Quantity Input + Apply ───
+                        if (_bulkOperationType <= 2)
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _bulkQtyController,
+                                  keyboardType: TextInputType.number,
+                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                                  decoration: InputDecoration(
+                                    hintText: _bulkOperationType == 0
+                                        ? '+ كمية للإضافة'
+                                        : _bulkOperationType == 1
+                                            ? '- كمية للخصم'
+                                            : '= الكمية الجديدة',
+                                    hintStyle: TextStyle(color: Colors.grey[400], fontSize: 12),
+                                    prefixIcon: Icon(
+                                      _bulkOperationType == 0
+                                          ? Icons.add
+                                          : _bulkOperationType == 1
+                                              ? Icons.remove
+                                              : Icons.drag_handle,
+                                      color: _bulkOperationType == 0
+                                          ? AppTheme.successColor
+                                          : _bulkOperationType == 1
+                                              ? AppTheme.errorColor
+                                              : AppTheme.primaryColor,
+                                      size: 20,
+                                    ),
+                                    filled: true,
+                                    fillColor: AppTheme.neutralLightColor,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              ElevatedButton(
+                                onPressed: () => _applyBulkOperation(),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _bulkOperationType == 0
+                                      ? AppTheme.successColor
+                                      : _bulkOperationType == 1
+                                          ? AppTheme.errorColor
+                                          : AppTheme.primaryColor,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  elevation: 2,
+                                ),
+                                child: const Text('تطبيق', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              ),
+                            ],
+                          )
+                        else
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _applyBulkOperation(),
+                                  icon: Icon(
+                                    _bulkOperationType == 3
+                                        ? Icons.delete_forever
+                                        : _bulkOperationType == 4
+                                            ? Icons.category
+                                            : Icons.palette,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    _bulkOperationType == 3
+                                        ? 'حذف ${_selectedProductIds.length} منتج'
+                                        : _bulkOperationType == 4
+                                            ? 'تغيير القسم'
+                                            : 'تغيير اللون',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _bulkOperationType == 3
+                                        ? AppTheme.errorColor
+                                        : _bulkOperationType == 4
+                                            ? AppTheme.warningColor
+                                            : AppTheme.primaryColor,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                       ],
                     ),
                   ),
@@ -1764,15 +1825,140 @@ trailing: _isSelectionMode
 
   // ─── العملية المجمعة ───
   Future<void> _applyBulkOperation() async {
-    final qty = int.tryParse(_bulkQtyController.text);
-    if (qty == null || qty <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('أدخل كمية صحيحة أكبر من صفر'), backgroundColor: AppTheme.errorColor),
-      );
-      return;
-    }
     if (_selectedProductIds.isEmpty) return;
 
+    // العمليات 0,1,2 تحتاج كمية
+    if (_bulkOperationType <= 2) {
+      final qty = int.tryParse(_bulkQtyController.text);
+      if (qty == null || qty <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('أدخل كمية صحيحة أكبر من صفر'), backgroundColor: AppTheme.errorColor),
+        );
+        return;
+      }
+    }
+
+    // ─── حذف جماعي ───
+    if (_bulkOperationType == 3) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('تأكيد الحذف الجماعي', style: TextStyle(color: AppTheme.errorColor)),
+          content: Text('هل تريد حذف ${_selectedProductIds.length} منتج محدد؟\nسيتم حفظها في سجل الحذف.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('حذف الكل'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      int deleted = 0;
+      for (final id in _selectedProductIds) {
+        final success = await DatabaseHelper.instance.deleteProductWithLog(id);
+        if (success) deleted++;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تم حذف $deleted منتج'), backgroundColor: AppTheme.successColor),
+        );
+        _selectedProductIds.clear();
+        _isSelectionMode = false;
+        _loadAllProducts();
+      }
+      return;
+    }
+
+    // ─── تغيير القسم ───
+    if (_bulkOperationType == 4) {
+      final categories = await DatabaseHelper.instance.getAllCategories();
+      if (categories.isEmpty || !mounted) return;
+      String? selectedCat;
+      final confirmed = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('تغيير القسم للجميع'),
+          content: StatefulBuilder(
+            builder: (ctx, setDialogState) => DropdownButtonFormField<String>(
+              value: selectedCat,
+              items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+              onChanged: (v) => setDialogState(() => selectedCat = v),
+              decoration: const InputDecoration(labelText: 'اختر القسم'),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, selectedCat),
+              child: const Text('تطبيق'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == null || confirmed.isEmpty || !mounted) return;
+      final db = await DatabaseHelper.instance.database;
+      await db.transaction((txn) async {
+        for (final id in _selectedProductIds) {
+          await txn.update('products', {'category': confirmed}, where: 'id = ?', whereArgs: [id]);
+        }
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تم تغيير قسم ${_selectedProductIds.length} منتج إلى "$confirmed"'), backgroundColor: AppTheme.successColor),
+        );
+        _selectedProductIds.clear();
+        _isSelectionMode = false;
+        _loadAllProducts();
+      }
+      return;
+    }
+
+    // ─── تغيير اللون ───
+    if (_bulkOperationType == 5) {
+      final colorCtrl = TextEditingController();
+      final confirmed = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('تغيير اللون للجميع'),
+          content: TextField(
+            controller: colorCtrl,
+            decoration: const InputDecoration(labelText: 'اللون الجديد', hintText: 'مثال: أحمر'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, colorCtrl.text.trim()),
+              child: const Text('تطبيق'),
+            ),
+          ],
+        ),
+      );
+      colorCtrl.dispose();
+      if (confirmed == null || confirmed.isEmpty || !mounted) return;
+      final db = await DatabaseHelper.instance.database;
+      await db.transaction((txn) async {
+        for (final id in _selectedProductIds) {
+          await txn.update('products', {'color': confirmed}, where: 'id = ?', whereArgs: [id]);
+        }
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تم تغيير لون ${_selectedProductIds.length} منتج إلى "$confirmed"'), backgroundColor: AppTheme.successColor),
+        );
+        _selectedProductIds.clear();
+        _isSelectionMode = false;
+        _loadAllProducts();
+      }
+      return;
+    }
+
+    // ─── إضافة / خصم / تعيين كمية ───
+    final qty = int.tryParse(_bulkQtyController.text) ?? 0;
     final opName = _bulkOperationType == 0 ? 'إضافة' : _bulkOperationType == 1 ? 'خصم' : 'تعيين';
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1800,14 +1986,9 @@ trailing: _isSelectionMode
           final currentStock = (rows.first['stock'] as int?) ?? 0;
           int newStock;
           switch (_bulkOperationType) {
-            case 0:
-              newStock = currentStock + qty;
-              break;
-            case 1:
-              newStock = (currentStock - qty).clamp(0, 999999);
-              break;
-            default:
-              newStock = qty;
+            case 0: newStock = currentStock + qty; break;
+            case 1: newStock = (currentStock - qty).clamp(0, 999999); break;
+            default: newStock = qty;
           }
           await txn.update('products', {'stock': newStock}, where: 'id = ?', whereArgs: [id]);
         }
