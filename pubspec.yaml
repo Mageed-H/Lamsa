@@ -72,7 +72,7 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/fonts/
+    - assets/fonts/Cairo-Variable.ttf
 
   fonts:
     - family: Cairo
