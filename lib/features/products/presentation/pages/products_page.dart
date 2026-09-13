@@ -548,15 +548,17 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
             headerStyle: body(bold: true, fontSize: 11),
             cellStyle: body(fontSize: 10),
             headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
-            headers: ['المخزون', 'اللون', 'القسم', 'المنتج'],
+            headers: ['#', 'المخزون', 'اللون', 'القسم', 'المنتج'],
             cellAlignment: pw.Alignment.centerRight,
             data: selected.asMap().entries.map((e) {
+              final i = e.key + 1;
               final p = e.value;
               final name = (p['name'] as String?) ?? '';
               final category = (p['category'] as String?) ?? '';
               final stock = (p['stock'] as int? ?? 0);
               final color = (p['color'] as String?) ?? '';
               return [
+                '$i',
                 '$stock',
                 color.isNotEmpty ? color : '—',
                 category,
