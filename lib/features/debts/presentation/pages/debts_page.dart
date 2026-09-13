@@ -1066,126 +1066,26 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
             const SizedBox(height: 8),
             // ─── قائمة الفواتير ───
             ...debts.map((debt) {
+              final debtId = debt['id'] as int;
               final debtAmount = debt['amount'] as int;
               final debtPaid = (debt['paid'] as int?) ?? 0;
               final debtRemaining = debtAmount - debtPaid;
               final debtPaidOff = debtRemaining <= 0;
               final createdAt = _formatDate(debt['created_at'] as String?);
               final note = debt['note'] as String? ?? '';
-              return Container(
-                margin: const EdgeInsets.only(bottom: 6),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: debtPaidOff
-                      ? AppTheme.successColor.withValues(alpha: 0.06)
-                      : AppTheme.neutralLightColor,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: debtPaidOff
-                        ? AppTheme.successColor.withValues(alpha: 0.3)
-                        : AppTheme.errorColor.withValues(alpha: 0.2),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          debtPaidOff ? Icons.check_circle : Icons.receipt_long,
-                          size: 16,
-                          color: debtPaidOff ? AppTheme.successColor : AppTheme.errorColor,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            '$debtAmount دينار',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                              color: debtPaidOff ? AppTheme.successColor : AppTheme.primaryColor,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          createdAt,
-                          style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                    if (debtPaid > 0 && !debtPaidOff) ...[
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          const Icon(Icons.check, size: 12, color: AppTheme.successColor),
-                          const SizedBox(width: 4),
-                          Text(
-                            'مدفوع: $debtPaid | متبقي: $debtRemaining',
-                            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ],
-                    if (note.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        note,
-                        style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    // ─── أزرار الفرد ───
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        if (!debtPaidOff)
-                          SizedBox(
-                            height: 28,
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.successColor,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 10),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                              ),
-                              icon: const Icon(Icons.payments, size: 14),
-                              label: const Text('تسديد', style: TextStyle(fontSize: 11)),
-                              onPressed: () => _showPayDebtDialog(debt),
-                            ),
-                          ),
-                        const SizedBox(width: 6),
-                        SizedBox(
-                          height: 28,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppTheme.primaryColor,
-                              padding: const EdgeInsets.symmetric(horizontal: 10),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                            ),
-                            icon: const Icon(Icons.edit, size: 14),
-                            label: const Text('تعديل', style: TextStyle(fontSize: 11)),
-                            onPressed: () => _showEditDebtDialog(debt),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        SizedBox(
-                          height: 28,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppTheme.errorColor,
-                              padding: const EdgeInsets.symmetric(horizontal: 10),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                            ),
-                            icon: const Icon(Icons.delete_outline, size: 14),
-                            label: const Text('حذف', style: TextStyle(fontSize: 11)),
-                            onPressed: () => _confirmDelete(debt),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+              final saleId = debt['sale_id'] as int?;
+              return _DebtInvoiceCard(
+                debt: debt,
+                debtAmount: debtAmount,
+                debtPaid: debtPaid,
+                debtRemaining: debtRemaining,
+                debtPaidOff: debtPaidOff,
+                createdAt: createdAt,
+                note: note,
+                saleId: saleId,
+                onPay: () => _showPayDebtDialog(debt),
+                onEdit: () => _showEditDebtDialog(debt),
+                onDelete: () => _confirmDelete(debt),
               );
             }),
             // ─── زر إضافة فاتورة جديدة لنفس الزبون ───
@@ -1206,6 +1106,262 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── بطاقة فاتورة دين مع تفاصيل المادة ───
+class _DebtInvoiceCard extends StatefulWidget {
+  final Map<String, dynamic> debt;
+  final int debtAmount;
+  final int debtPaid;
+  final int debtRemaining;
+  final bool debtPaidOff;
+  final String createdAt;
+  final String note;
+  final int? saleId;
+  final VoidCallback onPay;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _DebtInvoiceCard({
+    required this.debt,
+    required this.debtAmount,
+    required this.debtPaid,
+    required this.debtRemaining,
+    required this.debtPaidOff,
+    required this.createdAt,
+    required this.note,
+    this.saleId,
+    required this.onPay,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  State<_DebtInvoiceCard> createState() => _DebtInvoiceCardState();
+}
+
+class _DebtInvoiceCardState extends State<_DebtInvoiceCard> {
+  List<Map<String, dynamic>> _saleItems = [];
+  bool _isLoadingItems = false;
+  bool _expanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.saleId != null && widget.saleId! > 0) {
+      _loadSaleItems();
+    }
+  }
+
+  Future<void> _loadSaleItems() async {
+    setState(() => _isLoadingItems = true);
+    final items = await DatabaseHelper.instance.getSaleItems(widget.saleId!);
+    if (mounted) {
+      setState(() {
+        _saleItems = items;
+        _isLoadingItems = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasSaleItems = _saleItems.isNotEmpty;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: widget.debtPaidOff
+            ? AppTheme.successColor.withValues(alpha: 0.06)
+            : AppTheme.neutralLightColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: widget.debtPaidOff
+              ? AppTheme.successColor.withValues(alpha: 0.3)
+              : AppTheme.errorColor.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ─── رأس الفاتورة ───
+          Row(
+            children: [
+              Icon(
+                widget.debtPaidOff ? Icons.check_circle : Icons.receipt_long,
+                size: 16,
+                color: widget.debtPaidOff ? AppTheme.successColor : AppTheme.errorColor,
+              ),
+              const SizedBox(width: 6),
+              if (widget.saleId != null && widget.saleId! > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    'R${widget.saleId.toString().padLeft(6, '0')}',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                  ),
+                ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '${widget.debtAmount} دينار',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: widget.debtPaidOff ? AppTheme.successColor : AppTheme.primaryColor,
+                  ),
+                ),
+              ),
+              Text(
+                widget.createdAt,
+                style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+              ),
+            ],
+          ),
+          if (widget.debtPaid > 0 && !widget.debtPaidOff) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.check, size: 12, color: AppTheme.successColor),
+                const SizedBox(width: 4),
+                Text(
+                  'مدفوع: ${widget.debtPaid} | متبقي: ${widget.debtRemaining}',
+                  style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                ),
+              ],
+            ),
+          ],
+          if (widget.note.isNotEmpty && !widget.note.startsWith('فاتورة')) ...[
+            const SizedBox(height: 4),
+            Text(
+              widget.note,
+              style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          // ─── تفاصيل المواد ───
+          if (hasSaleItems) ...[
+            const SizedBox(height: 6),
+            GestureDetector(
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  children: [
+                    Icon(_expanded ? Icons.expand_less : Icons.expand_more, size: 16, color: AppTheme.primaryColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      'عرض تفاصيل الفاتورة (${_saleItems.length} صنف)',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_expanded) ...[
+              const SizedBox(height: 6),
+              // رأس الجدول
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                color: AppTheme.neutralLightColor,
+                child: const Row(
+                  children: [
+                    Expanded(flex: 4, child: Text('المادة', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                    Expanded(flex: 2, child: Text('العدد', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
+                    Expanded(flex: 3, child: Text('السعر', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
+                    Expanded(flex: 3, child: Text('الإجمالي', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
+                  ],
+                ),
+              ),
+              // المواد
+              ..._saleItems.map((item) {
+                final name = item['product_name'] as String? ?? '';
+                final qty = item['quantity'] as int? ?? 0;
+                final unitPrice = item['unit_price'] as int? ?? 0;
+                final rowTotal = unitPrice * qty;
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  child: Row(
+                    children: [
+                      Expanded(flex: 4, child: Text(name, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis)),
+                      Expanded(flex: 2, child: Text('x$qty', style: const TextStyle(fontSize: 11), textAlign: TextAlign.center)),
+                      Expanded(flex: 3, child: Text('$unitPrice', style: const TextStyle(fontSize: 11), textAlign: TextAlign.center)),
+                      Expanded(flex: 3, child: Text('$rowTotal', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ] else if (widget.saleId != null && _isLoadingItems) ...[
+            const SizedBox(height: 6),
+            const SizedBox(
+              height: 16, width: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ],
+          // ─── أزرار الفرد ───
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              if (!widget.debtPaidOff)
+                SizedBox(
+                  height: 28,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.successColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    icon: const Icon(Icons.payments, size: 14),
+                    label: const Text('تسديد', style: TextStyle(fontSize: 11)),
+                    onPressed: widget.onPay,
+                  ),
+                ),
+              const SizedBox(width: 6),
+              SizedBox(
+                height: 28,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.primaryColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  ),
+                  icon: const Icon(Icons.edit, size: 14),
+                  label: const Text('تعديل', style: TextStyle(fontSize: 11)),
+                  onPressed: widget.onEdit,
+                ),
+              ),
+              const SizedBox(width: 6),
+              SizedBox(
+                height: 28,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.errorColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  ),
+                  icon: const Icon(Icons.delete_outline, size: 14),
+                  label: const Text('حذف', style: TextStyle(fontSize: 11)),
+                  onPressed: widget.onDelete,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
