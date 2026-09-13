@@ -411,6 +411,7 @@ class _SalesPageState extends State<SalesPage> {
                     revenue: _summary['today_revenue'] ?? 0,
                     profit: _summary['today_profit'] ?? 0,
                     count: _summary['today_count'] ?? 0,
+                    units: _summary['today_units'] ?? 0,
                     expenses: _expensesSummary['today'] ?? 0,
                     color: AppTheme.primaryColor,
                   ),
@@ -422,6 +423,7 @@ class _SalesPageState extends State<SalesPage> {
                     revenue: _summary['all_revenue'] ?? 0,
                     profit: _summary['all_profit'] ?? 0,
                     count: _summary['all_count'] ?? 0,
+                    units: _summary['all_units'] ?? 0,
                     expenses: _expensesSummary['all'] ?? 0,
                     color: AppTheme.successColor,
                   ),
@@ -611,6 +613,7 @@ class _SalesPageState extends State<SalesPage> {
   Widget _buildPeriodSummary() {
     final rev = _filterSummary['revenue'] ?? 0;
     final pro = _filterSummary['profit'] ?? 0;
+    final units = _filterSummary['units'] ?? 0;
     final cost = rev - pro;
     final exp = _expenses.fold<int>(0, (s, e) => s + (e['amount'] as int? ?? 0));
     final netCash = rev - cost - exp;
@@ -628,6 +631,7 @@ class _SalesPageState extends State<SalesPage> {
             _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
             _buildStatColumn('المصروفات', '$exp د', AppTheme.errorColor),
             _buildStatColumn('الأرباح', '$pro د', AppTheme.successColor),
+            _buildStatColumn('القطع', '$units', AppTheme.primaryColor),
             _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
           ],
         ),
@@ -641,6 +645,7 @@ class _SalesPageState extends State<SalesPage> {
     required int revenue,
     required int profit,
     required int count,
+    required int units,
     required int expenses,
     required Color color,
   }) {
@@ -669,6 +674,7 @@ class _SalesPageState extends State<SalesPage> {
                 _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
                 _buildStatColumn('المصروفات', '$expenses د', AppTheme.errorColor),
                 _buildStatColumn('الأرباح', '$profit د', AppTheme.successColor),
+                _buildStatColumn('القطع', '$units', AppTheme.primaryColor),
                 _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
               ],
             ),

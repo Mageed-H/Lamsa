@@ -1172,23 +1172,25 @@ class DatabaseHelper {
       final today = DateTime.now().toIso8601String().substring(0, 10);
 
       final todayResult = await db.rawQuery(
-        "SELECT COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(total_profit), 0) as profit, COUNT(*) as count FROM sales WHERE created_at LIKE ?",
+        "SELECT COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(items_count), 0) as units, COUNT(*) as count FROM sales WHERE created_at LIKE ?",
         ['$today%'],
       );
       final allResult = await db.rawQuery(
-        'SELECT COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(total_profit), 0) as profit, COUNT(*) as count FROM sales',
+        'SELECT COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(items_count), 0) as units, COUNT(*) as count FROM sales',
       );
 
       return {
         'today_revenue': todayResult.first['revenue'] as int? ?? 0,
         'today_profit': todayResult.first['profit'] as int? ?? 0,
         'today_count': todayResult.first['count'] as int? ?? 0,
+        'today_units': todayResult.first['units'] as int? ?? 0,
         'all_revenue': allResult.first['revenue'] as int? ?? 0,
         'all_profit': allResult.first['profit'] as int? ?? 0,
         'all_count': allResult.first['count'] as int? ?? 0,
+        'all_units': allResult.first['units'] as int? ?? 0,
       };
     } catch (e) {
-      return {'today_revenue': 0, 'today_profit': 0, 'today_count': 0, 'all_revenue': 0, 'all_profit': 0, 'all_count': 0};
+      return {'today_revenue': 0, 'today_profit': 0, 'today_count': 0, 'today_units': 0, 'all_revenue': 0, 'all_profit': 0, 'all_count': 0, 'all_units': 0};
     }
   }
 
@@ -1223,16 +1225,17 @@ class DatabaseHelper {
     try {
       final db = await instance.database;
       final result = await db.rawQuery(
-        "SELECT COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(total_profit), 0) as profit, COUNT(*) as count FROM sales WHERE created_at >= ? AND created_at < ?",
+        "SELECT COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(items_count), 0) as units, COUNT(*) as count FROM sales WHERE created_at >= ? AND created_at < ?",
         [from, to],
       );
       return {
         'revenue': result.first['revenue'] as int? ?? 0,
         'profit': result.first['profit'] as int? ?? 0,
+        'units': result.first['units'] as int? ?? 0,
         'count': result.first['count'] as int? ?? 0,
       };
     } catch (e) {
-      return {'revenue': 0, 'profit': 0, 'count': 0};
+      return {'revenue': 0, 'profit': 0, 'units': 0, 'count': 0};
     }
   }
 
