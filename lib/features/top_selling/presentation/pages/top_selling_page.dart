@@ -20,7 +20,16 @@ class _TopSellingPageState extends State<TopSellingPage> {
   List<Map<String, dynamic>> _topProducts = [];
   Map<String, dynamic> _generalStats = {};
   bool _isLoading = true;
+
+  // ─── فلاتر ───
   int _limit = 20;
+  String? _filterCategory;
+  DateTime? _filterStartDate;
+  DateTime? _filterEndDate;
+  bool _showFilters = false;
+
+  // قائمة الأقسام
+  List<String> _categories = [];
 
   @override
   void initState() {
@@ -30,8 +39,32 @@ class _TopSellingPageState extends State<TopSellingPage> {
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final topProducts = await DatabaseHelper.instance.getTopSellingProducts(limit: _limit);
-    final generalStats = await DatabaseHelper.instance.getGeneralSalesStats();
+
+    // جلب الأقسام
+    final cats = await DatabaseHelper.instance.getAllCategories();
+    _categories = cats.where((c) => c.isNotEmpty).toList();
+
+    // تاريخ البداية والنهاية بصيغة string
+    String? startDate;
+    String? endDate;
+    if (_filterStartDate != null) {
+      startDate = _filterStartDate!.toIso8601String().substring(0, 10);
+    }
+    if (_filterEndDate != null) {
+      // نضيف يوم كامل ليوم الانتهاء يشمل كامل اليوم
+      endDate = _filterEndDate!.add(const Duration(days: 1)).toIso8601String().substring(0, 10);
+    }
+
+    final topProducts = await DatabaseHelper.instance.getTopSellingProducts(
+      limit: _limit,
+      category: _filterCategory,
+      startDate: startDate,
+      endDate: endDate,
+    );
+    final generalStats = await DatabaseHelper.instance.getGeneralSalesStats(
+      startDate: startDate,
+      endDate: endDate,
+    );
     if (mounted) {
       setState(() {
         _topProducts = topProducts;
@@ -41,35 +74,72 @@ class _TopSellingPageState extends State<TopSellingPage> {
     }
   }
 
+  void _clearFilters() {
+    setState(() {
+      _filterCategory = null;
+      _filterStartDate = null;
+      _filterEndDate = null;
+      _limit = 20;
+    });
+    _loadData();
+  }
+
+  bool get _hasActiveFilters =>
+      _filterCategory != null || _filterStartDate != null || _filterEndDate != null;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('الأكثر مبيعاً', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
-          PopupMenuButton<int>(
-            icon: const Icon(Icons.filter_list),
-            onSelected: (v) => setState(() { _limit = v; _loadData(); }),
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(value: 10, child: Text('أعلى 10')),
-              const PopupMenuItem(value: 20, child: Text('أعلى 20')),
-              const PopupMenuItem(value: 50, child: Text('أعلى 50')),
-              const PopupMenuItem(value: 100, child: Text('الكل')),
-            ],
+          IconButton(
+            icon: Icon(_showFilters ? Icons.filter_list_off : Icons.filter_list),
+            tooltip: 'الفلاتر',
+            onPressed: () => setState(() => _showFilters = !_showFilters),
           ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.file_download),
+          PopupMenuButton<int>(
+            icon: const Icon(Icons.more_vert),
             onSelected: (v) {
-              if (v == 'pdf') _exportPDF();
-              if (v == 'csv') _exportCSV();
+              if (v == 0) {
+                _showLimitDialog();
+              } else if (v == 1) {
+                _exportPDF();
+              } else if (v == 2) {
+                _exportCSV();
+              }
             },
             itemBuilder: (ctx) => [
-              const PopupMenuItem(value: 'pdf', child: Row(
-                children: [Icon(Icons.picture_as_pdf, color: AppTheme.errorColor, size: 18), SizedBox(width: 8), Text('تصدير PDF')],
-              )),
-              const PopupMenuItem(value: 'csv', child: Row(
-                children: [Icon(Icons.table_chart, color: AppTheme.successColor, size: 18), SizedBox(width: 8), Text('تصدير CSV')],
-              )),
+              PopupMenuItem(
+                value: 0,
+                child: Row(
+                  children: [
+                    const Icon(Icons.format_list_numbered, size: 18),
+                    const SizedBox(width: 8),
+                    Text('الحد: $_limit'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 1,
+                child: Row(
+                  children: [
+                    const Icon(Icons.picture_as_pdf, color: AppTheme.errorColor, size: 18),
+                    const SizedBox(width: 8),
+                    const Text('تصدير PDF'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 2,
+                child: Row(
+                  children: [
+                    const Icon(Icons.table_chart, color: AppTheme.successColor, size: 18),
+                    const SizedBox(width: 8),
+                    const Text('تصدير CSV'),
+                  ],
+                ),
+              ),
             ],
           ),
         ],
@@ -81,9 +151,22 @@ class _TopSellingPageState extends State<TopSellingPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  // ─── شريط الفلاتر ───
+                  if (_showFilters) _buildFilterBar(),
+                  // ─── روابط الفلاتر النشطة ───
+                  if (_hasActiveFilters) _buildActiveFilterChips(),
                   // ─── الإحصائيات العامة ───
                   _buildGeneralStats(),
                   const SizedBox(height: 16),
+                  // ─── عنوان القائمة ───
+                  Row(
+                    children: [
+                      const Text('المنتجات', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      const Spacer(),
+                      Text('${_topProducts.length} منتج', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
                   // ─── قائمة المنتجات ───
                   if (_topProducts.isEmpty)
                     const Center(
@@ -93,7 +176,7 @@ class _TopSellingPageState extends State<TopSellingPage> {
                           children: [
                             Icon(Icons.trending_up, size: 48, color: AppTheme.textSecondary),
                             SizedBox(height: 8),
-                            Text('لا توجد بيانات مبيعات بعد', style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)),
+                            Text('لا توجد بيانات مبيعات', style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)),
                           ],
                         ),
                       ),
@@ -105,6 +188,208 @@ class _TopSellingPageState extends State<TopSellingPage> {
             ),
     );
   }
+
+  // ═══════════════════════════════════════════════════
+  // فلاتر
+  // ═══════════════════════════════════════════════════
+
+  Widget _buildFilterBar() {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.filter_list, size: 18, color: AppTheme.primaryColor),
+                const SizedBox(width: 6),
+                const Text('الفلاتر', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const Spacer(),
+                if (_hasActiveFilters)
+                  TextButton.icon(
+                    onPressed: _clearFilters,
+                    icon: const Icon(Icons.clear_all, size: 16),
+                    label: const Text('مسح الكل'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // ─── القسم ───
+            DropdownButtonFormField<String>(
+              value: _filterCategory,
+              decoration: InputDecoration(
+                labelText: 'القسم',
+                prefixIcon: const Icon(Icons.category, size: 18),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                isDense: true,
+              ),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('الكل')),
+                ..._categories.map((c) => DropdownMenuItem(value: c, child: Text(c))),
+              ],
+              onChanged: (v) {
+                setState(() => _filterCategory = v);
+                _loadData();
+              },
+            ),
+            const SizedBox(height: 10),
+            // ─── التاريخ ───
+            Row(
+              children: [
+                Expanded(
+                  child: _buildDateField(
+                    label: 'من تاريخ',
+                    date: _filterStartDate,
+                    onTap: () => _pickDate(isStart: true),
+                    onClear: () { setState(() => _filterStartDate = null); _loadData(); },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildDateField(
+                    label: 'إلى تاريخ',
+                    date: _filterEndDate,
+                    onTap: () => _pickDate(isStart: false),
+                    onClear: () { setState(() => _filterEndDate = null); _loadData(); },
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDateField({
+    required String label,
+    required DateTime? date,
+    required VoidCallback onTap,
+    required VoidCallback onClear,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: const Icon(Icons.calendar_today, size: 16),
+          suffixIcon: date != null
+              ? IconButton(
+                  icon: const Icon(Icons.clear, size: 16),
+                  onPressed: onClear,
+                )
+              : null,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          isDense: true,
+        ),
+        child: Text(
+          date != null ? '${date.day}/${date.month}/${date.year}' : 'اختر',
+          style: TextStyle(
+            color: date != null ? AppTheme.textPrimary : AppTheme.textSecondary,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickDate({required bool isStart}) async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: isStart ? (_filterStartDate ?? now) : (_filterEndDate ?? now),
+      firstDate: DateTime(2020),
+      lastDate: now,
+      locale: const Locale('ar'),
+    );
+    if (picked != null) {
+      setState(() {
+        if (isStart) {
+          _filterStartDate = picked;
+        } else {
+          _filterEndDate = picked;
+        }
+      });
+      _loadData();
+    }
+  }
+
+  Widget _buildActiveFilterChips() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          if (_filterCategory != null)
+            Chip(
+              label: Text('القسم: $_filterCategory', style: const TextStyle(fontSize: 12)),
+              deleteIcon: const Icon(Icons.close, size: 14),
+              onDeleted: () { setState(() => _filterCategory = null); _loadData(); },
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          if (_filterStartDate != null)
+            Chip(
+              label: Text('من: ${_filterStartDate!.day}/${_filterStartDate!.month}/${_filterStartDate!.year}', style: const TextStyle(fontSize: 12)),
+              deleteIcon: const Icon(Icons.close, size: 14),
+              onDeleted: () { setState(() => _filterStartDate = null); _loadData(); },
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          if (_filterEndDate != null)
+            Chip(
+              label: Text('إلى: ${_filterEndDate!.day}/${_filterEndDate!.month}/${_filterEndDate!.year}', style: const TextStyle(fontSize: 12)),
+              deleteIcon: const Icon(Icons.close, size: 14),
+              onDeleted: () { setState(() => _filterEndDate = null); _loadData(); },
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showLimitDialog() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('عرض أعلى...', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
+              ...[10, 20, 50, 100].map((n) => ListTile(
+                    leading: Icon(
+                      _limit == n ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                      color: AppTheme.primaryColor,
+                    ),
+                    title: Text('$n منتج'),
+                    onTap: () {
+                      setState(() => _limit = n);
+                      Navigator.pop(ctx);
+                      _loadData();
+                    },
+                  )),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════
+  // الإحصائيات العامة
+  // ═══════════════════════════════════════════════════
 
   Widget _buildGeneralStats() {
     final totalRevenue = (_generalStats['total_revenue'] ?? 0) as int;
@@ -154,19 +439,25 @@ class _TopSellingPageState extends State<TopSellingPage> {
     );
   }
 
+  // ═══════════════════════════════════════════════════
+  // كرت المنتج
+  // ═══════════════════════════════════════════════════
+
   Widget _buildProductCard(int rank, Map<String, dynamic> product) {
     final name = product['name'] as String? ?? '';
+    final category = product['category'] as String? ?? '';
+    final colorStr = product['color'] as String? ?? '';
     final totalSold = (product['total_sold'] ?? 0) as int;
     final totalRevenue = (product['total_revenue'] ?? 0) as int;
     final totalProfit = (product['total_profit'] ?? 0) as int;
 
     Color rankColor;
     if (rank == 0) {
-      rankColor = const Color(0xFFFFD700); // ذهبي
+      rankColor = const Color(0xFFFFD700);
     } else if (rank == 1) {
-      rankColor = const Color(0xFFC0C0C0); // فضي
+      rankColor = const Color(0xFFC0C0C0);
     } else if (rank == 2) {
-      rankColor = const Color(0xFFCD7F32); // برونزي
+      rankColor = const Color(0xFFCD7F32);
     } else {
       rankColor = AppTheme.textSecondary;
     }
@@ -197,7 +488,23 @@ class _TopSellingPageState extends State<TopSellingPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  Row(
+                    children: [
+                      // اللون
+                      if (colorStr.isNotEmpty) ...[
+                        _parseColorDot(colorStr),
+                        const SizedBox(width: 6),
+                      ],
+                      // الاسم
+                      Expanded(
+                        child: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      ),
+                    ],
+                  ),
+                  if (category.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(category, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                  ],
                   const SizedBox(height: 4),
                   Row(
                     children: [
@@ -217,6 +524,29 @@ class _TopSellingPageState extends State<TopSellingPage> {
     );
   }
 
+  Widget _parseColorDot(String colorStr) {
+    final c = _hexToColor(colorStr);
+    return Container(
+      width: 14,
+      height: 14,
+      decoration: BoxDecoration(
+        color: c,
+        shape: BoxShape.circle,
+        border: Border.all(color: c == Colors.white ? Colors.grey : c, width: 1.5),
+      ),
+    );
+  }
+
+  Color _hexToColor(String hex) {
+    hex = hex.replaceFirst('#', '');
+    if (hex.length == 6) hex = 'FF$hex';
+    try {
+      return Color(int.parse(hex, radix: 16));
+    } catch (_) {
+      return Colors.grey;
+    }
+  }
+
   Widget _buildMiniStat(IconData icon, String text, Color color) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -232,7 +562,10 @@ class _TopSellingPageState extends State<TopSellingPage> {
     return n.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
   }
 
-  // ─── تصدير PDF ───
+  // ═══════════════════════════════════════════════════
+  // تصدير PDF
+  // ═══════════════════════════════════════════════════
+
   Future<void> _exportPDF() async {
     try {
       final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
@@ -250,6 +583,10 @@ class _TopSellingPageState extends State<TopSellingPage> {
                 pw.Text('تقرير الأكثر مبيعاً', style: pw.TextStyle(font: aroFont, fontSize: 20, fontWeight: pw.FontWeight.bold)),
                 pw.SizedBox(height: 4),
                 pw.Text('تاريخ: ${DateTime.now().toString().substring(0, 16)}', style: pw.TextStyle(font: aroFont, fontSize: 10)),
+                if (_hasActiveFilters) ...[
+                  pw.SizedBox(height: 4),
+                  pw.Text('فلاتر: ${_buildFilterSummaryText()}', style: pw.TextStyle(font: aroFont, fontSize: 10)),
+                ],
                 pw.SizedBox(height: 16),
                 // الإحصائيات العامة
                 pw.Container(
@@ -273,13 +610,15 @@ class _TopSellingPageState extends State<TopSellingPage> {
                   headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
                   cellAlignment: pw.Alignment.centerRight,
                   headerAlignment: pw.Alignment.centerRight,
-                  headers: ['#', 'المنتج', 'الكمية', 'الإيراد', 'الربح'],
+                  headers: ['#', 'المنتج', 'اللون', 'القسم', 'الكمية', 'الإيراد', 'الربح'],
                   data: _topProducts.asMap().entries.map((e) {
                     final i = e.key + 1;
                     final p = e.value;
                     return [
                       '$i',
                       '${p['name']}',
+                      '${p['color'] ?? ''}',
+                      '${p['category'] ?? ''}',
                       '${p['total_sold']}',
                       '${p['total_revenue']} د',
                       '${p['total_profit']} د',
@@ -312,17 +651,22 @@ class _TopSellingPageState extends State<TopSellingPage> {
     );
   }
 
-  // ─── تصدير CSV ───
+  // ═══════════════════════════════════════════════════
+  // تصدير CSV
+  // ═══════════════════════════════════════════════════
+
   Future<void> _exportCSV() async {
     try {
       final rows = <List<String>>[
-        ['#', 'المنتج', 'الكمية المباعة', 'إجمالي الإيراد', 'إجمالي الربح'],
+        ['#', 'المنتج', 'اللون', 'القسم', 'الكمية المباعة', 'إجمالي الإيراد', 'إجمالي الربح'],
       ];
       for (var i = 0; i < _topProducts.length; i++) {
         final p = _topProducts[i];
         rows.add([
           '${i + 1}',
           '${p['name']}',
+          '${p['color'] ?? ''}',
+          '${p['category'] ?? ''}',
           '${p['total_sold']}',
           '${p['total_revenue']}',
           '${p['total_profit']}',
@@ -330,13 +674,15 @@ class _TopSellingPageState extends State<TopSellingPage> {
       }
 
       final csv = const ListToCsvConverter().convert(rows);
+      final desktopPath = Platform.environment['USERPROFILE'] ?? '';
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/top_selling_${DateTime.now().millisecondsSinceEpoch}.csv');
+      final filePath = '$desktopPath\\Desktop\\top_selling_${DateTime.now().millisecondsSinceEpoch}.csv';
+      final file = File(filePath);
       await file.writeAsString(csv);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('تم حفظ الملف: ${file.path}'), backgroundColor: AppTheme.successColor),
+          SnackBar(content: Text('تم حفظ الملف: $filePath'), backgroundColor: AppTheme.successColor),
         );
       }
     } catch (e) {
@@ -346,5 +692,13 @@ class _TopSellingPageState extends State<TopSellingPage> {
         );
       }
     }
+  }
+
+  String _buildFilterSummaryText() {
+    final parts = <String>[];
+    if (_filterCategory != null) parts.add('قسم: $_filterCategory');
+    if (_filterStartDate != null) parts.add('من: ${_filterStartDate!.day}/${_filterStartDate!.month}/${_filterStartDate!.year}');
+    if (_filterEndDate != null) parts.add('إلى: ${_filterEndDate!.day}/${_filterEndDate!.month}/${_filterEndDate!.year}');
+    return parts.join(' | ');
   }
 }

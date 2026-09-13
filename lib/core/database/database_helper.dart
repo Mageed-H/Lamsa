@@ -1699,22 +1699,46 @@ class DatabaseHelper {
   }
 
   /// جلب أعلى المنتجات مبيعاً
-  Future<List<Map<String, dynamic>>> getTopSellingProducts({int limit = 10}) async {
+  Future<List<Map<String, dynamic>>> getTopSellingProducts({
+    int limit = 10,
+    String? category,
+    String? startDate,
+    String? endDate,
+  }) async {
     try {
       final db = await instance.database;
+      final where = <String>[];
+      final args = <dynamic>[];
+      if (category != null && category.isNotEmpty) {
+        where.add('p.category = ?');
+        args.add(category);
+      }
+      if (startDate != null) {
+        where.add('s.created_at >= ?');
+        args.add(startDate);
+      }
+      if (endDate != null) {
+        where.add('s.created_at < ?');
+        args.add(endDate);
+      }
+      final whereClause = where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}';
       return await db.rawQuery('''
         SELECT 
           si.product_id,
           p.name,
+          p.category,
+          p.color,
           SUM(si.quantity) as total_sold,
           SUM(si.quantity * si.unit_price) as total_revenue,
           SUM(si.quantity * (si.unit_price - si.purchase_price)) as total_profit
         FROM sale_items si
         JOIN products p ON p.id = si.product_id
+        JOIN sales s ON s.id = si.sale_id
+        $whereClause
         GROUP BY si.product_id
         ORDER BY total_sold DESC
         LIMIT ?
-      ''', [limit]);
+      ''', [...args, limit]);
     } catch (e) {
       return [];
     }
