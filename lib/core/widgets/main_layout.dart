@@ -8,6 +8,7 @@ import '../../features/pos/presentation/pages/pos_page.dart';
 import '../../features/products/presentation/pages/products_page.dart';
 import '../../features/sales/presentation/pages/sales_page.dart';
 import '../../features/debts/presentation/pages/debts_page.dart';
+import '../../features/top_selling/presentation/pages/top_selling_page.dart';
 import '../../features/settings/presentation/pages/dev_settings_page.dart';
 import '../theme/app_theme.dart';
 
@@ -42,6 +43,7 @@ class _MainLayoutState extends State<MainLayout> {
     const ProductsPage(), // شاشة إدارة المنتجات (Index 1)
     const SalesPage(), // شاشة المبيعات (Index 2)
     const DebtsPage(), // شاشة الديون (Index 3)
+    const TopSellingPage(), // شاشة الأكثر مبيعاً (Index 4)
   ];
 
   @override
@@ -200,7 +202,7 @@ class _MainLayoutState extends State<MainLayout> {
     return Scaffold(
       body: Stack(
         children: _pages.asMap().entries.map((entry) {
-          final contexts = ['الكاشير', 'المنتجات', 'المبيعات', 'الديون'];
+          final contexts = ['الكاشير', 'المنتجات', 'المبيعات', 'الديون', 'الأكثر مبيعاً'];
           return Offstage(
             offstage: entry.key != _currentIndex,
             child: ErrorBoundary(
@@ -234,6 +236,10 @@ class _MainLayoutState extends State<MainLayout> {
           BottomNavigationBarItem(
             icon: Icon(Icons.account_balance_wallet),
             label: 'الديون',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.trending_up),
+            label: 'الأكثر مبيعاً',
           ),
         ],
       ),
