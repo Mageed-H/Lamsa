@@ -1286,6 +1286,7 @@ class _PosPageState extends State<PosPage> {
       final itemDiscount = (item['item_discount'] as int?) ?? 0;
       final effectivePrice = itemPrice - itemDiscount;
       final rowTotal = effectivePrice * qty;
+      final extras = [if (product.color.isNotEmpty) product.color, if (product.size.isNotEmpty) product.size].join(' ');
       itemWidgets.add(
         pw.Padding(
           padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
@@ -1293,43 +1294,38 @@ class _PosPageState extends State<PosPage> {
             children: [
               pw.Expanded(
                 flex: 4,
-                child: pw.Text(
-                  product.name,
-                  style: body(),
-                  textDirection: pw.TextDirection.rtl,
-                  textAlign: pw.TextAlign.center,
-                  overflow: pw.TextOverflow.clip,
+                child: pw.Column(
+                  children: [
+                    pw.Text(
+                      product.name,
+                      style: body(),
+                      textDirection: pw.TextDirection.rtl,
+                      textAlign: pw.TextAlign.center,
+                      overflow: pw.TextOverflow.clip,
+                    ),
+                    if (extras.isNotEmpty)
+                      pw.Text(
+                        extras,
+                        style: pw.TextStyle(font: aroFont, fontSize: bodyFs - 1, color: PdfColors.grey600),
+                        textDirection: pw.TextDirection.rtl,
+                        textAlign: pw.TextAlign.center,
+                      ),
+                  ],
                 ),
               ),
-              // vSep,
               pw.Expanded(
                 flex: 2,
-                child: pw.Text(
-                  'x$qty',
-                  style: body(),
-                  textAlign: pw.TextAlign.center,
-                ),
+                child: pw.Text('x$qty', style: body(), textAlign: pw.TextAlign.center),
               ),
-              // vSep,
               pw.Expanded(
                 flex: 3,
-                child: pw.Text(
-                  '$itemPrice',
-                  style: body(),
-                  textAlign: pw.TextAlign.center,
-                ),
+                child: pw.Text('$itemPrice', style: body(), textAlign: pw.TextAlign.center),
               ),
-              // vSep,
               pw.Expanded(
                 flex: 3,
-                child: pw.Text(
-                  '$rowTotal',
-                  style: bodyBold(),
-                  textAlign: pw.TextAlign.center,
-                ),
+                child: pw.Text('$rowTotal', style: bodyBold(), textAlign: pw.TextAlign.center),
               ),
             ],
-
           ),
         ),
       );
@@ -2185,11 +2181,30 @@ class _PosPageState extends State<PosPage> {
                                         Row(
                                           children: [
                                             Expanded(
-                                              child: Text(
-                                                product.name,
-                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    product.name,
+                                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                  if (product.color.isNotEmpty || product.size.isNotEmpty)
+                                                    Row(
+                                                      children: [
+                                                        if (product.color.isNotEmpty) ...[
+                                                          Icon(Icons.circle, size: 8, color: _posParseColor(product.color)),
+                                                          const SizedBox(width: 3),
+                                                          Text(product.color, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary)),
+                                                        ],
+                                                        if (product.color.isNotEmpty && product.size.isNotEmpty)
+                                                          const Text(' | ', style: TextStyle(fontSize: 10, color: AppTheme.textSecondary)),
+                                                        if (product.size.isNotEmpty)
+                                                          Text(product.size, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary)),
+                                                      ],
+                                                    ),
+                                                ],
                                               ),
                                             ),
                                             GestureDetector(
@@ -2441,6 +2456,22 @@ class _PosPageState extends State<PosPage> {
         ),
     );
   }
+
+Color _posParseColor(String name) {
+  const map = {
+    'أحمر': Colors.red, 'اخضر': Colors.green,
+    'أزرق': Colors.blue, 'اسود': Colors.black, 'أبيض': Colors.white,
+    'اصفر': Colors.yellow, 'برتقالي': Colors.orange, 'بنفسجي': Colors.purple,
+    'وردي': Colors.pink, 'بني': Colors.brown, 'رمادي': Colors.grey,
+    'سماوي': Colors.lightBlue, 'نعناعي': Colors.teal,
+    'ذهبي': Color(0xFFFFD700), 'فضي': Color(0xFFC0C0C0),
+  };
+  final lower = name.toLowerCase().trim();
+  for (final entry in map.entries) {
+    if (lower.contains(entry.key)) return entry.value;
+  }
+  return AppTheme.textSecondary;
+}
 
 Widget _qtyBtn(IconData icon, Color color, VoidCallback onTap) {
     return GestureDetector(
