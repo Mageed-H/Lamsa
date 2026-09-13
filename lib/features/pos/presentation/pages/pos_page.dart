@@ -1443,11 +1443,7 @@ class _PosPageState extends State<PosPage> {
                   children: [
                     pw.Text(
                       '- $discountValue $currency',
-                      style: pw.TextStyle(
-                        font: aroFont,
-                        fontSize: bodyFs,
-                        color: PdfColors.red,
-                      ),
+                      style: body(),
                     ),
                     pw.Text(
                       'الخصم:',
