@@ -291,7 +291,6 @@ class _TopSellingPageState extends State<TopSellingPage> {
       initialDate: isStart ? (_filterStartDate ?? now) : (_filterEndDate ?? now),
       firstDate: DateTime(2020),
       lastDate: now,
-      locale: const Locale('ar'),
     );
     if (picked != null) {
       setState(() {
