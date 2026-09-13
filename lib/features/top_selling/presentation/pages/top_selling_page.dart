@@ -1,13 +1,10 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:csv/csv.dart';
 
 class TopSellingPage extends StatefulWidget {
   const TopSellingPage({Key? key}) : super(key: key);
@@ -105,8 +102,6 @@ class _TopSellingPageState extends State<TopSellingPage> {
                 _showLimitDialog();
               } else if (v == 1) {
                 _exportPDF();
-              } else if (v == 2) {
-                _exportCSV();
               }
             },
             itemBuilder: (ctx) => [
@@ -127,16 +122,6 @@ class _TopSellingPageState extends State<TopSellingPage> {
                     const Icon(Icons.picture_as_pdf, color: AppTheme.errorColor, size: 18),
                     const SizedBox(width: 8),
                     const Text('تصدير PDF'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 2,
-                child: Row(
-                  children: [
-                    const Icon(Icons.table_chart, color: AppTheme.successColor, size: 18),
-                    const SizedBox(width: 8),
-                    const Text('تصدير CSV'),
                   ],
                 ),
               ),
@@ -649,49 +634,6 @@ class _TopSellingPageState extends State<TopSellingPage> {
         pw.Text(label, style: pw.TextStyle(font: font, fontSize: 8)),
       ],
     );
-  }
-
-  // ═══════════════════════════════════════════════════
-  // تصدير CSV
-  // ═══════════════════════════════════════════════════
-
-  Future<void> _exportCSV() async {
-    try {
-      final rows = <List<String>>[
-        ['#', 'المنتج', 'اللون', 'القسم', 'الكمية المباعة', 'إجمالي الإيراد', 'إجمالي الربح'],
-      ];
-      for (var i = 0; i < _topProducts.length; i++) {
-        final p = _topProducts[i];
-        rows.add([
-          '${i + 1}',
-          '${p['name']}',
-          '${p['color'] ?? ''}',
-          '${p['category'] ?? ''}',
-          '${p['total_sold']}',
-          '${p['total_revenue']}',
-          '${p['total_profit']}',
-        ]);
-      }
-
-      final csv = const ListToCsvConverter().convert(rows);
-      final desktopPath = Platform.environment['USERPROFILE'] ?? '';
-      final dir = await getApplicationDocumentsDirectory();
-      final filePath = '$desktopPath\\Desktop\\top_selling_${DateTime.now().millisecondsSinceEpoch}.csv';
-      final file = File(filePath);
-      await file.writeAsString(csv);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('تم حفظ الملف: $filePath'), backgroundColor: AppTheme.successColor),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ في تصدير CSV: $e'), backgroundColor: AppTheme.errorColor),
-        );
-      }
-    }
   }
 
   String _buildFilterSummaryText() {
