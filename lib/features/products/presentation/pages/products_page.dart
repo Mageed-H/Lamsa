@@ -349,30 +349,190 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
     ));
   }
 
+  // ─── تحويل اسم اللون لـ Color ───
+  Color _parseColor(String name) {
+    const map = {
+      'أحمر': Colors.red, 'اخضر': Colors.green,
+      'أزرق': Colors.blue, 'اسود': Colors.black, 'أبيض': Colors.white,
+      'اصفر': Colors.yellow, 'برتقالي': Colors.orange, 'بنفسجي': Colors.purple,
+      'وردي': Colors.pink, 'بني': Colors.brown, 'رمادي': Colors.grey,
+      'سماوي': Colors.lightBlue, 'نعناعي': Colors.teal, 'بيج': Color(0xFFF5F5DC),
+      'ذهبي': Color(0xFFFFD700), 'فضي': Color(0xFFC0C0C0),
+    };
+    final lower = name.toLowerCase().trim();
+    for (final entry in map.entries) {
+      if (lower.contains(entry.key)) return entry.value;
+    }
+    return AppTheme.textSecondary;
+  }
+
   // ─── تصدير المنتجات قليلة المخزون PDF ───
   Future<void> _exportLowStockPdf() async {
-    try {
-      final db = await DatabaseHelper.instance.database;
-      final products = await db.query('products', orderBy: 'stock ASC');
-      final lowStock = products.where((p) => (p['stock'] as int? ?? 0) <= 5).toList();
-      if (lowStock.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('لا توجد منتجات قليلة المخزون (5 أو أقل)'), backgroundColor: AppTheme.warningColor),
-          );
-        }
-        return;
+    final db = await DatabaseHelper.instance.database;
+    final products = await db.query('products', orderBy: 'category ASC, stock ASC');
+    final lowStock = products.where((p) => (p['stock'] as int? ?? 0) <= 5).toList();
+    if (lowStock.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('لا توجد منتجات قليلة المخزون (5 أو أقل)'), backgroundColor: AppTheme.warningColor),
+        );
       }
+      return;
+    }
+
+    // ─── تحديد المنتجات ───
+    final selectedIds = lowStock.map((p) => p['id'] as int).toSet();
+    final notesCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.warning_amber, color: AppTheme.errorColor),
+              const SizedBox(width: 8),
+              const Text('المنتجات قليلة المخزون', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Spacer(),
+              Text('${selectedIds.length}/${lowStock.length}', style: const TextStyle(fontSize: 14, color: AppTheme.primaryColor)),
+            ],
+          ),
+          content: SizedBox(
+            width: 500,
+            height: 400,
+            child: Column(
+              children: [
+                // أزرار تحديد الكل / إلغاء الكل
+                Row(
+                  children: [
+                    OutlinedButton(
+                      onPressed: () => setDialogState(() {
+                        selectedIds.addAll(lowStock.map((p) => p['id'] as int));
+                      }),
+                      child: const Text('تحديد الكل', style: TextStyle(fontSize: 12)),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: () => setDialogState(() => selectedIds.clear()),
+                      child: const Text('إلغاء الكل', style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: lowStock.length,
+                    itemBuilder: (ctx, i) {
+                      final p = lowStock[i];
+                      final id = p['id'] as int;
+                      final name = p['name'] as String? ?? '';
+                      final category = p['category'] as String? ?? '';
+                      final stock = p['stock'] as int? ?? 0;
+                      final color = p['color'] as String? ?? '';
+                      final isSelected = selectedIds.contains(id);
+                      return CheckboxListTile(
+                        value: isSelected,
+                        onChanged: (v) => setDialogState(() {
+                          if (v == true) {
+                            selectedIds.add(id);
+                          } else {
+                            selectedIds.remove(id);
+                          }
+                        }),
+                        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        subtitle: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(category, style: const TextStyle(fontSize: 11, color: AppTheme.primaryColor)),
+                            ),
+                            const SizedBox(width: 6),
+                            Text('المخزون: $stock', style: TextStyle(
+                              fontSize: 11,
+                              color: stock == 0 ? AppTheme.errorColor : AppTheme.textSecondary,
+                              fontWeight: FontWeight.bold,
+                            )),
+                            if (color.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              Icon(Icons.circle, size: 10, color: _parseColor(color)),
+                              const SizedBox(width: 2),
+                              Text(color, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                            ],
+                          ],
+                        ),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                      );
+                    },
+                  ),
+                ),
+                const Divider(),
+                // حقل الملاحظات
+                TextField(
+                  controller: notesCtrl,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    hintText: 'ملاحظات (تظهر في نهاية التقرير)...',
+                    hintStyle: TextStyle(color: Colors.grey[400], fontSize: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.picture_as_pdf, size: 18),
+              label: Text('تصدير ${selectedIds.length} منتج', style: const TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: selectedIds.isEmpty ? null : () => Navigator.pop(ctx, true),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    // ─── تصفية المنتجات المحددة ───
+    final selected = lowStock.where((p) => selectedIds.contains(p['id'] as int)).toList();
+    // ترتيب حسب القسم
+    selected.sort((a, b) {
+      final catA = (a['category'] as String?) ?? '';
+      final catB = (b['category'] as String?) ?? '';
+      final catCompare = catA.compareTo(catB);
+      if (catCompare != 0) return catCompare;
+      return (a['stock'] as int? ?? 0).compareTo(b['stock'] as int? ?? 0);
+    });
+
+    try {
       final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
       final arabicFont = pw.Font.ttf(fontData);
       final doc = pw.Document();
       final now = DateTime.now();
       final dateStr = '${now.year}/${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')}';
+      final notes = notesCtrl.text.trim();
 
-      pw.TextStyle body({bool bold = false}) => pw.TextStyle(
-        font: arabicFont, fontSize: 9,
+      pw.TextStyle body({bool bold = false, double fontSize = 10}) => pw.TextStyle(
+        font: arabicFont, fontSize: fontSize,
         fontWeight: bold ? pw.FontWeight.bold : null,
       );
+
+      // تجميع حسب القسم
+      final grouped = <String, List<Map<String, dynamic>>>{};
+      for (final p in selected) {
+        final cat = (p['category'] as String?) ?? 'غير محدد';
+        grouped.putIfAbsent(cat, () => []).add(p);
+      }
 
       doc.addPage(pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
@@ -380,31 +540,54 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
         build: (ctx) => [
           pw.Center(child: pw.Text('المنتجات قليلة المخزون', style: pw.TextStyle(font: arabicFont, fontSize: 18, fontWeight: pw.FontWeight.bold))),
           pw.SizedBox(height: 4),
-          pw.Center(child: pw.Text('$dateStr  |  ${lowStock.length} منتج', style: body())),
-          pw.SizedBox(height: 12),
+          pw.Center(child: pw.Text('$dateStr  |  ${selected.length} منتج', style: body())),
+          pw.SizedBox(height: 16),
+
+          // ─── الجدول ───
           pw.TableHelper.fromTextArray(
-            headerStyle: body(bold: true),
-            cellStyle: body(),
-            headerDecoration: const pw.BoxDecoration(color: PdfColors.red50),
-            headers: ['#', 'المنتج', 'القسم', 'المخزون', 'سعر الشراء', 'سعر البيع', 'الحالة'],
-            data: lowStock.asMap().entries.map((e) {
-              final i = e.key + 1;
+            headerStyle: body(bold: true, fontSize: 11),
+            cellStyle: body(fontSize: 10),
+            headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
+            headers: ['المخزون', 'اللون', 'القسم', 'المنتج'],
+            cellAlignment: pw.Alignment.centerRight,
+            data: selected.asMap().entries.map((e) {
               final p = e.value;
-              final stock = p['stock'] as int? ?? 0;
-              final status = stock == 0 ? 'نفد' : stock <= 2 ? 'حرج' : stock <= 4 ? 'واطئ' : 'مقبول';
+              final name = (p['name'] as String?) ?? '';
+              final category = (p['category'] as String?) ?? '';
+              final stock = (p['stock'] as int? ?? 0);
+              final color = (p['color'] as String?) ?? '';
               return [
-                '$i',
-                '${p['name'] ?? ''}',
-                '${p['category'] ?? ''}',
                 '$stock',
-                '${p['purchase_price'] ?? 0}',
-                '${p['price'] ?? 0}',
-                status,
+                color.isNotEmpty ? color : '—',
+                category,
+                name,
               ];
             }).toList(),
           ),
+
+          // ─── الملاحظات ───
+          if (notes.isNotEmpty) ...[
+            pw.SizedBox(height: 20),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(12),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(width: 0.5),
+                borderRadius: pw.BorderRadius.circular(6),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('ملاحظات:', style: body(bold: true)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(notes, style: body()),
+                ],
+              ),
+            ),
+          ],
         ],
       ));
+
       final pdfBytes = await doc.save();
       final safeName = 'Low_Stock_$dateStr.pdf'.replaceAll('/', '-');
       final userProfile = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '.';
@@ -417,7 +600,7 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('تم حفظ التقرير على سطح المكتب ✓\n$safeName (${lowStock.length} منتج)'),
+            content: Text('تم حفظ التقرير على سطح المكتب ✓\n$safeName (${selected.length} منتج)'),
             backgroundColor: AppTheme.successColor,
             duration: const Duration(seconds: 4),
           ),
