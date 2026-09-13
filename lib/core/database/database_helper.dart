@@ -1106,7 +1106,8 @@ class DatabaseHelper {
         itemsCount += qty;
       }
 
-      final clampedProfit = (itemsProfit - discountValue).clamp(0, itemsProfit);
+      final profitBeforeDiscount = itemsProfit - discountValue;
+      final clampedProfit = profitBeforeDiscount < 0 ? 0 : profitBeforeDiscount;
       // توليد رقم الوصل
       final lastSale = await txn.rawQuery('SELECT id FROM sales ORDER BY id DESC LIMIT 1');
       final nextId = (lastSale.isEmpty ? 0 : lastSale.first['id'] as int) + 1;
