@@ -1,5 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/core/widgets/custom_button.dart';
@@ -346,6 +349,89 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
     ));
   }
 
+  // ─── تصدير المنتجات قليلة المخزون PDF ───
+  Future<void> _exportLowStockPdf() async {
+    try {
+      final db = await DatabaseHelper.instance.database;
+      final products = await db.query('products', orderBy: 'stock ASC');
+      final lowStock = products.where((p) => (p['stock'] as int? ?? 0) <= 5).toList();
+      if (lowStock.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('لا توجد منتجات قليلة المخزون (5 أو أقل)'), backgroundColor: AppTheme.warningColor),
+          );
+        }
+        return;
+      }
+      final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
+      final arabicFont = pw.Font.ttf(fontData);
+      final doc = pw.Document();
+      final now = DateTime.now();
+      final dateStr = '${now.year}/${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')}';
+
+      pw.TextStyle body({bool bold = false}) => pw.TextStyle(
+        font: arabicFont, fontSize: 9,
+        fontWeight: bold ? pw.FontWeight.bold : null,
+      );
+
+      doc.addPage(pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        textDirection: pw.TextDirection.rtl,
+        build: (ctx) => [
+          pw.Center(child: pw.Text('المنتجات قليلة المخزون', style: pw.TextStyle(font: arabicFont, fontSize: 18, fontWeight: pw.FontWeight.bold))),
+          pw.SizedBox(height: 4),
+          pw.Center(child: pw.Text('$dateStr  |  ${lowStock.length} منتج', style: body())),
+          pw.SizedBox(height: 12),
+          pw.TableHelper.fromTextArray(
+            headerStyle: body(bold: true),
+            cellStyle: body(),
+            headerDecoration: const pw.BoxDecoration(color: PdfColors.red50),
+            headers: ['#', 'المنتج', 'القسم', 'المخزون', 'سعر الشراء', 'سعر البيع', 'الحالة'],
+            data: lowStock.asMap().entries.map((e) {
+              final i = e.key + 1;
+              final p = e.value;
+              final stock = p['stock'] as int? ?? 0;
+              final status = stock == 0 ? 'نفد' : stock <= 2 ? 'حرج' : stock <= 4 ? 'واطئ' : 'مقبول';
+              return [
+                '$i',
+                '${p['name'] ?? ''}',
+                '${p['category'] ?? ''}',
+                '$stock',
+                '${p['purchase_price'] ?? 0}',
+                '${p['price'] ?? 0}',
+                status,
+              ];
+            }).toList(),
+          ),
+        ],
+      ));
+      final pdfBytes = await doc.save();
+      final safeName = 'Low_Stock_$dateStr.pdf'.replaceAll('/', '-');
+      final userProfile = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '.';
+      final sep = Platform.pathSeparator;
+      final desktop = '$userProfile${sep}Desktop';
+      final desktopDir = Directory(desktop);
+      if (!await desktopDir.exists()) await desktopDir.create(recursive: true);
+      final file = File('$desktop$sep$safeName');
+      await file.writeAsBytes(pdfBytes);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تم حفظ التقرير على سطح المكتب ✓\n$safeName (${lowStock.length} منتج)'),
+            backgroundColor: AppTheme.successColor,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
+        );
+      }
+    }
+  }
+
   // إضافة باركود إضافي أثناء إضافة منتج جديد
   Future<void> _addExtraBarcode() async {
     final ctrl = TextEditingController();
@@ -675,6 +761,16 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
             ],
           ),
           actions: [
+            if (_tabController.index == 1 && !_isSelectionMode)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: Colors.white),
+                onSelected: (v) {
+                  if (v == 'low_stock') _exportLowStockPdf();
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'low_stock', child: Row(children: [Icon(Icons.warning_amber, size: 18, color: AppTheme.errorColor), SizedBox(width: 8), Text('تصدير المنتجات قليلة المخزون')])),
+                ],
+              ),
             if (_tabController.index == 1 && _isSelectionMode) ...[
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white),
