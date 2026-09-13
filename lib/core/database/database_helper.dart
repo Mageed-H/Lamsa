@@ -1158,8 +1158,12 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getSaleItems(int saleId) async {
     try {
       final db = await instance.database;
-      return await db.query('sale_items',
-          where: 'sale_id = ?', whereArgs: [saleId]);
+      return await db.rawQuery('''
+        SELECT si.*, p.color, p.size
+        FROM sale_items si
+        LEFT JOIN products p ON p.id = si.product_id
+        WHERE si.sale_id = ?
+      ''', [saleId]);
     } catch (e) {
       return [];
     }

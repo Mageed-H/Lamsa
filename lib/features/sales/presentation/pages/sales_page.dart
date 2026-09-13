@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/services/error_logger.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
@@ -811,9 +812,9 @@ class _SaleDetailsSheet extends StatefulWidget {
 }
 
 class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
-  // كمية الإرجاع لكل بند: {sale_item_id: return_qty}
   late Map<int, int> _returnQtys;
   bool _isReturning = false;
+  bool _isPrinting = false;
 
   @override
   void initState() {
@@ -881,6 +882,167 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
     if (success) widget.onReturnDone();
   }
 
+  Future<void> _reprintReceipt() async {
+    setState(() => _isPrinting = true);
+    try {
+      final settings = await DatabaseHelper.instance.getAllSettings();
+      final storeName = settings['store_name'] ?? 'أحلى الحلوين';
+      final storePhone = settings['store_phone'] ?? '';
+      final currency = settings['currency'] ?? 'دينار';
+      final footer = settings['receipt_footer'] ?? 'شكراً لزيارتكم';
+      final titleFs = double.tryParse(settings['receipt_title_font_size'] ?? '14') ?? 14.0;
+      final bodyFs = double.tryParse(settings['receipt_body_font_size'] ?? '9') ?? 9.0;
+      final paperW = double.tryParse(settings['receipt_paper_width_mm'] ?? '78') ?? 78.0;
+      final marginTop = double.tryParse(settings['receipt_margin_top_mm'] ?? settings['receipt_margin_mm'] ?? '5') ?? 5.0;
+      final marginBottom = double.tryParse(settings['receipt_margin_bottom_mm'] ?? settings['receipt_margin_mm'] ?? '5') ?? 5.0;
+      final marginLeft = double.tryParse(settings['receipt_margin_left_mm'] ?? settings['receipt_margin_mm'] ?? '5') ?? 5.0;
+      final marginRight = double.tryParse(settings['receipt_margin_right_mm'] ?? settings['receipt_margin_mm'] ?? '5') ?? 5.0;
+      final savedPrinterUrl = settings['receipt_printer_url'] ?? settings['default_printer_url'] ?? '';
+      final savedPrinterName = settings['receipt_printer_name'] ?? settings['default_printer_name'] ?? '';
+
+      final fontData = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
+      final aroFont = pw.Font.ttf(fontData);
+
+      pw.TextStyle body() => pw.TextStyle(font: aroFont, fontSize: bodyFs);
+      pw.TextStyle bodyBold() => pw.TextStyle(font: aroFont, fontSize: bodyFs, fontWeight: pw.FontWeight.bold);
+      pw.TextStyle titleSt() => pw.TextStyle(font: aroFont, fontSize: titleFs, fontWeight: pw.FontWeight.bold);
+      pw.TextStyle subTitleSt() => pw.TextStyle(font: aroFont, fontSize: titleFs - 2);
+
+      final solidDiv = pw.Divider(thickness: 0.5, color: PdfColors.black);
+      final dottedDiv = pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 2),
+        child: pw.Row(
+          children: List.generate(80, (i) => pw.Expanded(
+            child: pw.Container(height: 1, color: i.isEven ? PdfColors.black : PdfColors.white),
+          )),
+        ),
+      );
+
+      final items = widget.items;
+      final phoneH = storePhone.isNotEmpty ? 8.0 : 0.0;
+      final discountH = widget.discountAmount > 0 ? 16.0 : 0.0;
+      final rowH = bodyFs * 1.5 + 5.0;
+      final pageH = 52.0 + phoneH + items.length * (rowH + 3.0) + discountH + 46.0;
+
+      final pageFormat = PdfPageFormat(
+        paperW * PdfPageFormat.mm,
+        pageH * PdfPageFormat.mm,
+        marginTop: marginTop * PdfPageFormat.mm,
+        marginBottom: marginBottom * PdfPageFormat.mm,
+        marginLeft: marginLeft * PdfPageFormat.mm,
+        marginRight: marginRight * PdfPageFormat.mm,
+      );
+
+      final List<pw.Widget> itemWidgets = [];
+      for (var i = 0; i < items.length; i++) {
+        final item = items[i];
+        final name = item['product_name'] as String? ?? '';
+        final qty = item['quantity'] as int? ?? 0;
+        final itemPrice = item['unit_price'] as int? ?? 0;
+        final rowTotal = itemPrice * qty;
+        final color = item['color'] as String? ?? '';
+        final size = item['size'] as String? ?? '';
+        final extras = [if (color.isNotEmpty) color, if (size.isNotEmpty) size].join(' ');
+        itemWidgets.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+            child: pw.Row(
+              children: [
+                pw.Expanded(
+                  flex: 4,
+                  child: pw.Column(
+                    children: [
+                      pw.Text(name, style: body(), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center),
+                      if (extras.isNotEmpty)
+                        pw.Text(extras, style: pw.TextStyle(font: aroFont, fontSize: bodyFs - 1, color: PdfColors.grey600), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center),
+                    ],
+                  ),
+                ),
+                pw.Expanded(flex: 2, child: pw.Text('x$qty', style: body(), textAlign: pw.TextAlign.center)),
+                pw.Expanded(flex: 3, child: pw.Text('$itemPrice', style: body(), textAlign: pw.TextAlign.center)),
+                pw.Expanded(flex: 3, child: pw.Text('$rowTotal', style: bodyBold(), textAlign: pw.TextAlign.center)),
+              ],
+            ),
+          ),
+        );
+        if (i < items.length - 1) itemWidgets.add(dottedDiv);
+      }
+
+      final doc = pw.Document();
+      doc.addPage(
+        pw.Page(
+          pageFormat: pageFormat,
+          textDirection: pw.TextDirection.rtl,
+          build: (ctx) => pw.Padding(
+            padding: const pw.EdgeInsets.only(right: 4, left: 4),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Text(storeName, style: titleSt(), textDirection: pw.TextDirection.rtl),
+                if (storePhone.isNotEmpty)
+                  pw.Text(storePhone, style: subTitleSt(), textDirection: pw.TextDirection.rtl),
+                pw.SizedBox(height: 3),
+                solidDiv,
+                pw.Text(widget.time, style: body()),
+                pw.SizedBox(height: 2),
+                pw.Text('رقم الوصل: R${widget.saleId.toString().padLeft(6, '0')}', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+                pw.SizedBox(height: 3),
+                solidDiv,
+                ...itemWidgets,
+                pw.SizedBox(height: 3),
+                solidDiv,
+                if (widget.discountAmount > 0) ...[
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text('الخصم', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+                      pw.Text('${widget.discountAmount} $currency', style: bodyBold()),
+                    ],
+                  ),
+                  pw.SizedBox(height: 4),
+                ],
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('المجموع', style: pw.TextStyle(font: aroFont, fontSize: bodyFs + 4, fontWeight: pw.FontWeight.bold), textDirection: pw.TextDirection.rtl),
+                    pw.Text('${widget.totalAmount} $currency', style: pw.TextStyle(font: aroFont, fontSize: bodyFs + 4, fontWeight: pw.FontWeight.bold)),
+                  ],
+                ),
+                pw.SizedBox(height: 3),
+                solidDiv,
+                pw.SizedBox(height: 4),
+                pw.Text(footer, style: body(), textDirection: pw.TextDirection.rtl),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      if (savedPrinterUrl.isNotEmpty) {
+        try {
+          final ok = await Printing.directPrintPdf(
+            printer: Printer(url: savedPrinterUrl, name: savedPrinterName),
+            onLayout: (_) async => doc.save(),
+          );
+          if (ok) return;
+        } catch (_) {}
+      }
+      await Printing.layoutPdf(
+        onLayout: (_) async => doc.save(),
+        name: 'فاتورة R${widget.saleId.toString().padLeft(6, '0')}',
+      );
+    } catch (e, st) {
+      await ErrorLogger.instance.logError(e, st, context: 'إعادة طباعة فاتورة من صفحة المبيعات');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('فشلت الطباعة: $e'), backgroundColor: AppTheme.errorColor),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPrinting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -893,7 +1055,18 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('فاتورة #${widget.saleId}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
-              Text(widget.time, style: const TextStyle(color: AppTheme.textSecondary)),
+              Row(
+                children: [
+                  IconButton(
+                    icon: _isPrinting
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.print, size: 20),
+                    tooltip: 'طباعة الوصل',
+                    onPressed: _isPrinting ? null : _reprintReceipt,
+                  ),
+                  Text(widget.time, style: const TextStyle(color: AppTheme.textSecondary)),
+                ],
+              ),
             ],
           ),
           const Divider(),
