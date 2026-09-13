@@ -474,7 +474,6 @@ class _PosPageState extends State<PosPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('السعر الأصلي: ${product.price} دينار', style: const TextStyle(color: AppTheme.textSecondary)),
-            Text('سعر الشراء: ${product.purchasePrice} دينار (الحد الأدنى)', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             TextField(
               controller: priceCtrl,
@@ -512,7 +511,7 @@ class _PosPageState extends State<PosPage> {
               if (newPrice < product.purchasePrice) {
                 ScaffoldMessenger.of(ctx).showSnackBar(
                   SnackBar(
-                    content: Text('السعر لا يمكن أن يقل عن سعر الشراء (${product.purchasePrice} دينار)'),
+                    content: Text('السعر لا يمكن أن يقل عن سعر الشراء '),
                     backgroundColor: AppTheme.errorColor,
                   ),
                 );
