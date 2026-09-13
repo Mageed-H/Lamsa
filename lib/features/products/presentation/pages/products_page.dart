@@ -75,6 +75,7 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
   final _bulkQtyController = TextEditingController();
   final _bulkSellPriceController = TextEditingController();
   final _bulkBuyPriceController = TextEditingController();
+  int _bulkPriceMode = 2; // 0=زيادة%, 1=خصم%, 2=سعر ثابت
 
   // ─── الفلاتر والترتيب ───
   Map<int, Map<String, dynamic>> _productSalesStats = {};
@@ -1483,7 +1484,20 @@ trailing: _isSelectionMode
                           )
                         else if (_bulkOperationType == 6)
                           Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              // ─── أوضاع السعر (3 أزرار) ───
+                              Row(
+                                children: [
+                                  _buildPriceModeChip(0, 'زيادة %', Icons.trending_up, AppTheme.successColor),
+                                  const SizedBox(width: 6),
+                                  _buildPriceModeChip(1, 'خصم %', Icons.trending_down, AppTheme.errorColor),
+                                  const SizedBox(width: 6),
+                                  _buildPriceModeChip(2, 'سعر ثابت', Icons.attach_money, AppTheme.primaryColor),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              // ─── حقل السعر ───
                               Row(
                                 children: [
                                   Expanded(
@@ -1492,9 +1506,21 @@ trailing: _isSelectionMode
                                       keyboardType: TextInputType.number,
                                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                                       decoration: InputDecoration(
-                                        hintText: 'سعر البيع (اترك فارغ = بدون تغيير)',
+                                        hintText: _bulkPriceMode == 2
+                                            ? 'سعر البيع الجديد'
+                                            : _bulkPriceMode == 0
+                                                ? '+ % زيادة على البيع'
+                                                : '- % خصم من البيع',
                                         hintStyle: TextStyle(color: Colors.grey[400], fontSize: 11),
-                                        prefixIcon: const Icon(Icons.sell, color: AppTheme.successColor, size: 18),
+                                        prefixIcon: Icon(
+                                          _bulkPriceMode == 0
+                                              ? Icons.trending_up
+                                              : _bulkPriceMode == 1
+                                                  ? Icons.trending_down
+                                                  : Icons.sell,
+                                          color: AppTheme.successColor,
+                                          size: 18,
+                                        ),
                                         filled: true,
                                         fillColor: AppTheme.neutralLightColor,
                                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
@@ -1509,9 +1535,21 @@ trailing: _isSelectionMode
                                       keyboardType: TextInputType.number,
                                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                                       decoration: InputDecoration(
-                                        hintText: 'سعر الشراء (اترك فارغ = بدون تغيير)',
+                                        hintText: _bulkPriceMode == 2
+                                            ? 'سعر الشراء الجديد'
+                                            : _bulkPriceMode == 0
+                                                ? '+ % زيادة على الشراء'
+                                                : '- % خصم من الشراء',
                                         hintStyle: TextStyle(color: Colors.grey[400], fontSize: 11),
-                                        prefixIcon: const Icon(Icons.shopping_cart, color: AppTheme.warningColor, size: 18),
+                                        prefixIcon: Icon(
+                                          _bulkPriceMode == 0
+                                              ? Icons.trending_up
+                                              : _bulkPriceMode == 1
+                                                  ? Icons.trending_down
+                                                  : Icons.shopping_cart,
+                                          color: AppTheme.warningColor,
+                                          size: 18,
+                                        ),
                                         filled: true,
                                         fillColor: AppTheme.neutralLightColor,
                                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
@@ -1526,10 +1564,28 @@ trailing: _isSelectionMode
                                 width: double.infinity,
                                 child: ElevatedButton.icon(
                                   onPressed: () => _applyBulkOperation(),
-                                  icon: const Icon(Icons.attach_money, size: 18),
-                                  label: Text('تطبيق الأسعار على ${_selectedProductIds.length} منتج', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                  icon: Icon(
+                                    _bulkPriceMode == 0
+                                        ? Icons.trending_up
+                                        : _bulkPriceMode == 1
+                                            ? Icons.trending_down
+                                            : Icons.attach_money,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    _bulkPriceMode == 0
+                                        ? 'زيادة % على ${_selectedProductIds.length} منتج'
+                                        : _bulkPriceMode == 1
+                                            ? 'خصم % من ${_selectedProductIds.length} منتج'
+                                            : 'تعيين سعر ثابت لـ ${_selectedProductIds.length} منتج',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  ),
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppTheme.successColor,
+                                    backgroundColor: _bulkPriceMode == 0
+                                        ? AppTheme.successColor
+                                        : _bulkPriceMode == 1
+                                            ? AppTheme.errorColor
+                                            : AppTheme.primaryColor,
                                     foregroundColor: Colors.white,
                                     padding: const EdgeInsets.symmetric(vertical: 14),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1902,6 +1958,43 @@ trailing: _isSelectionMode
     );
   }
 
+  // ─── بطاقة وضع السعر ───
+  Widget _buildPriceModeChip(int mode, String label, IconData icon, Color color) {
+    final isSelected = _bulkPriceMode == mode;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _bulkPriceMode = mode),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? color.withOpacity(0.1) : AppTheme.neutralLightColor,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSelected ? color : Colors.grey.withOpacity(0.2),
+              width: isSelected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 16),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? color : AppTheme.textSecondary,
+                  fontSize: 11,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ─── العملية المجمعة ───
   Future<void> _applyBulkOperation() async {
     if (_selectedProductIds.isEmpty) return;
@@ -2038,26 +2131,27 @@ trailing: _isSelectionMode
 
     // ─── تطبيق الأسعار ───
     if (_bulkOperationType == 6) {
-      final sellPrice = double.tryParse(_bulkSellPriceController.text);
-      final buyPrice = double.tryParse(_bulkBuyPriceController.text);
-      if (sellPrice == null && buyPrice == null) {
+      final sellValue = double.tryParse(_bulkSellPriceController.text);
+      final buyValue = double.tryParse(_bulkBuyPriceController.text);
+      if (sellValue == null && buyValue == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('أدخل سعر بيع أو سعر شراء واحد على الأقل'), backgroundColor: AppTheme.errorColor),
+          const SnackBar(content: Text('أدخل قيمة سعر البيع أو الشراء على الأقل'), backgroundColor: AppTheme.errorColor),
         );
         return;
       }
+      final modeLabel = _bulkPriceMode == 0 ? 'زيادة %' : _bulkPriceMode == 1 ? 'خصم %' : 'سعر ثابت';
       final parts = <String>[];
-      if (sellPrice != null) parts.add('بيع=$sellPrice');
-      if (buyPrice != null) parts.add('شراء=$buyPrice');
+      if (sellValue != null) parts.add('البيع ($sellValue${_bulkPriceMode <= 1 ? '%' : ''})');
+      if (buyValue != null) parts.add('الشراء ($buyValue${_bulkPriceMode <= 1 ? '%' : ''})');
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('تأكيد تغيير الأسعار', style: TextStyle(color: AppTheme.successColor)),
-          content: Text('سيتم تطبيق ${parts.join(' و ')} على ${_selectedProductIds.length} منتج محدد.'),
+          title: Text('تأكيد $modeLabel', style: TextStyle(color: AppTheme.primaryColor)),
+          content: Text('سيتم تطبيق $modeLabel على ${parts.join(' + ')} لـ ${_selectedProductIds.length} منتج محدد.'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('تطبيق'),
             ),
@@ -2069,15 +2163,31 @@ trailing: _isSelectionMode
         final db = await DatabaseHelper.instance.database;
         await db.transaction((txn) async {
           for (final id in _selectedProductIds) {
+            final rows = await txn.query('products', columns: ['sell_price', 'purchase_price'], where: 'id = ?', whereArgs: [id]);
+            if (rows.isEmpty) continue;
+            final currentSell = (rows.first['sell_price'] as num?)?.toDouble() ?? 0;
+            final currentBuy = (rows.first['purchase_price'] as num?)?.toDouble() ?? 0;
             final updates = <String, dynamic>{};
-            if (sellPrice != null) updates['sell_price'] = sellPrice;
-            if (buyPrice != null) updates['purchase_price'] = buyPrice;
-            await txn.update('products', updates, where: 'id = ?', whereArgs: [id]);
+            if (sellValue != null) {
+              switch (_bulkPriceMode) {
+                case 0: updates['sell_price'] = (currentSell * (1 + sellValue / 100)).roundToDouble(); break;
+                case 1: updates['sell_price'] = (currentSell * (1 - sellValue / 100)).clamp(0, 999999999).roundToDouble(); break;
+                default: updates['sell_price'] = sellValue;
+              }
+            }
+            if (buyValue != null) {
+              switch (_bulkPriceMode) {
+                case 0: updates['purchase_price'] = (currentBuy * (1 + buyValue / 100)).roundToDouble(); break;
+                case 1: updates['purchase_price'] = (currentBuy * (1 - buyValue / 100)).clamp(0, 999999999).roundToDouble(); break;
+                default: updates['purchase_price'] = buyValue;
+              }
+            }
+            if (updates.isNotEmpty) await txn.update('products', updates, where: 'id = ?', whereArgs: [id]);
           }
         });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('تم تطبيق الأسعار على ${_selectedProductIds.length} منتج'), backgroundColor: AppTheme.successColor),
+            SnackBar(content: Text('تم تطبيق $modeLabel على ${_selectedProductIds.length} منتج'), backgroundColor: AppTheme.successColor),
           );
           _selectedProductIds.clear();
           _isSelectionMode = false;
