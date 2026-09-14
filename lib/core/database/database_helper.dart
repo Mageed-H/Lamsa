@@ -1004,7 +1004,7 @@ class DatabaseHelper {
     try {
       final settings = await getLoyaltySettings();
       final pointsPerDinar = settings['points_per_dinar'] as int;
-      final points = (totalAmount / pointsPerDinar).floor();
+      final points = ((totalAmount / 1000) * pointsPerDinar).floor();
       if (points <= 0) return;
       final db = await instance.database;
       await db.rawUpdate('UPDATE customers SET loyalty_points = loyalty_points + ?, total_points_earned = total_points_earned + ?, total_spent = total_spent + ? WHERE name = ?', [points, points, totalAmount, customerName]);
@@ -1088,6 +1088,38 @@ class DatabaseHelper {
     try {
       final db = await instance.database;
       await db.update('customers', {'discount_percent': discountPercent.clamp(0, 100)}, where: 'name = ?', whereArgs: [customerName]);
+    } catch (_) {}
+  }
+
+  /// إعادة حساب نقاط الولاء لجميع العملاء بناءً على المبيعات الفعلية
+  Future<void> recalculateAllCustomerPoints() async {
+    try {
+      final db = await instance.database;
+      final settings = await getLoyaltySettings();
+      final pointsPerDinar = settings['points_per_dinar'] as int;
+      final giftThreshold = settings['gift_threshold'] as int;
+      final customers = await db.rawQuery('''
+        SELECT customer_name, SUM(total_amount) as total_spent
+        FROM sales WHERE customer_name != '' AND customer_name IS NOT NULL
+        GROUP BY customer_name
+      ''');
+      for (final c in customers) {
+        final name = c['customer_name'] as String;
+        final spent = (c['total_spent'] as int?) ?? 0;
+        final correctPoints = ((spent / 1000) * pointsPerDinar).floor();
+        await db.rawUpdate('UPDATE customers SET loyalty_points = ?, total_points_earned = ?, total_spent = ? WHERE name = ?', [correctPoints, correctPoints, spent, name]);
+        await db.delete('customer_rewards', where: 'customer_name = ? AND reward_type = ?', whereArgs: [name, 'auto_gift']);
+        final giftsCount = correctPoints ~/ giftThreshold;
+        for (var i = 0; i < giftsCount; i++) {
+          await db.insert('customer_rewards', {
+            'customer_name': name,
+            'reward_type': 'auto_gift',
+            'description': settings['gift_description'],
+            'points_spent': giftThreshold,
+            'created_at': DateTime.now().toIso8601String(),
+          });
+        }
+      }
     } catch (_) {}
   }
 

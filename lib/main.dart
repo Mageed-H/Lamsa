@@ -36,6 +36,11 @@ void main() async {
   // تهيئة قاعدة بيانات SQLite قبل فتح التطبيق حتى تكون جاهزة للاستعلامات السريعة
   await DatabaseHelper.instance.database;
 
+  // إعادة حساب نقاط الولاء (إصلاح بيانات قديمة)
+  () async {
+    try { await DatabaseHelper.instance.recalculateAllCustomerPoints(); } catch (_) {}
+  }();
+
   // نسخ احتياطي تلقائي يومي — لا يعطل بدء التشغيل أبداً
   () async {
     try {

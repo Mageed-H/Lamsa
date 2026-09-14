@@ -222,7 +222,7 @@ class _LoyaltySettingsPageState extends State<LoyaltySettingsPage> {
               Text('ملخص الإعدادات', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
             ]),
             const Divider(),
-            _buildInfoRow('شراء 10,000 د.ع', '${(10000 / ppd).floor()} نقطة'),
+            _buildInfoRow('شراء 10,000 د.ع', '${((10000 / 1000) * ppd).floor()} نقطة'),
             _buildInfoRow('خصم $ptd نقاط', '${ptd * dpp} د.ع'),
             _buildInfoRow('هدية كل $gt نقطة', _giftDescCtrl.text.isNotEmpty ? _giftDescCtrl.text : 'هدايا'),
           ],
