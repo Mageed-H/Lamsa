@@ -302,30 +302,18 @@ class _DevLockDialogState extends State<_DevLockDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final timeHint = '${now.year}'
-        '${now.month.toString().padLeft(2, '0')}'
-        '${now.day.toString().padLeft(2, '0')}'
-        '${now.hour.toString().padLeft(2, '0')}'
-        '${now.minute.toString().padLeft(2, '0')}';
-
     return AlertDialog(
       title: const Text('🔒  قفل المطور', style: TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('كلمة السر + الوقت (24 ساعة)', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-          const SizedBox(height: 4),
-          Text('مثال: secret123@$timeHint', style: TextStyle(color: Colors.grey.shade500, fontSize: 11, fontFamily: 'monospace')),
-          const SizedBox(height: 12),
           TextField(
             controller: _ctrl,
             focusNode: _focus,
             obscureText: true,
             onSubmitted: (_) => _verify(),
             decoration: InputDecoration(
-              hintText: 'كلمة_السر$timeHint',
+              hintText: 'أدخل كلمة المرور',
               prefixIcon: const Icon(Icons.vpn_key, size: 18),
               errorText: _error,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
