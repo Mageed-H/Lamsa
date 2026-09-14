@@ -212,7 +212,9 @@ class _PosPageState extends State<PosPage> {
   // تحديث حالة الظهور — يُستدعى من MainLayout عند تبديل التبويب
   void setPageVisible(bool visible) {
     _isPageVisible = visible;
-    if (!visible && mounted) {
+    if (visible && mounted) {
+      _loadAllProducts();
+    } else if (!visible && mounted) {
       // لما الصفحة تختفي، نزيل المؤشر من حقل الباركود
       _barcodeFocusNode.unfocus();
     }
@@ -1657,7 +1659,9 @@ class _PosPageState extends State<PosPage> {
           onLayout: (_) async => await Isolate.run(() => doc.save()),
         );
         if (ok) return;
-      } catch (_) {}
+    } catch (e) {
+      debugPrint('POS _loadAllProducts error: $e');
+    }
     }
     await Printing.layoutPdf(onLayout: (_) async {
       return await Isolate.run(() => doc.save());
