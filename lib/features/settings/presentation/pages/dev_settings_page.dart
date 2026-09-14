@@ -7,6 +7,7 @@ import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/core/services/error_logger.dart';
 import 'package:cashier_system/core/services/pin_hash.dart';
+import 'package:cashier_system/core/services/activation_service.dart';
 import 'package:cashier_system/features/z_report/presentation/pages/z_report_page.dart';
 
 /// صفحة إعدادات المطور — لا تظهر في القائمة الرئيسية
@@ -51,6 +52,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
   final _productsPinCtrl = TextEditingController();
   final _salesPinCtrl = TextEditingController();
   final _debtsPinCtrl = TextEditingController();
+  final _activationCodeCtrl = TextEditingController();
   String _selectedLogLevel = 'info';
   // طابعة الفواتير
   String _receiptPrinterName = '';
@@ -93,6 +95,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
     _productsPinCtrl.dispose();
     _salesPinCtrl.dispose();
     _debtsPinCtrl.dispose();
+    _activationCodeCtrl.dispose();
     super.dispose();
   }
 
@@ -882,6 +885,9 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                     ),
                   ),
                   const SizedBox(height: 32),
+                  _buildSectionHeader('🔑  التفعيل'),
+                  _buildActivationSection(),
+                  const SizedBox(height: 16),
                   _buildSectionHeader('💾  النسخ الاحتياطي'),
                   // زر النسخ الاحتياطي
                   SizedBox(
@@ -972,6 +978,176 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                 ],
               ),
             ),
+    );
+  }
+
+  // ─── قسم التفعيل ───
+  Widget _buildActivationSection() {
+    return FutureBuilder<DateTime?>(
+      future: ActivationService.instance.getExpiryDate(),
+      builder: (ctx, snap) {
+        final expiry = snap.data;
+        final isExpired = expiry != null && DateTime.now().isAfter(expiry);
+        final isActive = expiry != null && !isExpired;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // حالة التفعيل
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isActive
+                    ? const Color(0xFF1B5E20).withOpacity(0.3)
+                    : isExpired
+                        ? const Color(0xFFB71C1C).withOpacity(0.3)
+                        : const Color(0xFF37474F),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isActive
+                      ? Colors.green.shade400
+                      : isExpired
+                          ? Colors.red.shade400
+                          : Colors.white24,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isActive ? Icons.check_circle : isExpired ? Icons.error : Icons.lock_outline,
+                    color: isActive ? Colors.green : isExpired ? Colors.red : Colors.white38,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isActive ? 'التطبيق مفعّل ✅' : isExpired ? 'التفعيلة منتهية ❌' : 'التطبيق غير مفعّل',
+                          style: TextStyle(
+                            color: isActive ? Colors.green : isExpired ? Colors.red : Colors.white54,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        if (expiry != null)
+                          Text(
+                            'تاريخ الانتهاء: ${expiry.year}/${expiry.month.toString().padLeft(2, '0')}/${expiry.day.toString().padLeft(2, '0')}',
+                            style: TextStyle(
+                              color: isActive ? Colors.green.shade200 : Colors.red.shade200,
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            // إدخال التفعيلة
+            _buildSettingField(
+              controller: _activationCodeCtrl,
+              label: 'أدخل كود التفعيل',
+              hint: 'الصق الكود هنا...',
+              icon: Icons.vpn_key,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green.shade700,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    icon: const Icon(Icons.check, size: 18),
+                    label: const Text('تفعيل', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () async {
+                      final code = _activationCodeCtrl.text.trim();
+                      if (code.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('أدخل كود التفعيل أولاً'), backgroundColor: AppTheme.errorColor),
+                        );
+                        return;
+                      }
+                      final (valid, expiry) = ActivationService.instance.validateCode(code);
+                      if (!valid || expiry == null) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('الكود غير صالح!'), backgroundColor: AppTheme.errorColor),
+                          );
+                        }
+                        return;
+                      }
+                      await ActivationService.instance.saveCode(code);
+                      if (mounted) {
+                        setState(() {});
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('تم التفعيل بنجاح!\nالصلاحية تنتهي: ${expiry.year}/${expiry.month}/${expiry.day}'),
+                            backgroundColor: AppTheme.successColor,
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red.shade300,
+                      side: BorderSide(color: Colors.red.shade700),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: const Text('حذف التفعيلة', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('حذف التفعيلة', style: TextStyle(color: AppTheme.errorColor)),
+                          content: const Text('هل أنت متأكد؟ سيتوقف التطبيق عن العمل بعد الحذف.'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor, foregroundColor: Colors.white),
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: const Text('حذف'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) {
+                        await ActivationService.instance.clearCode();
+                        _activationCodeCtrl.clear();
+                        if (mounted) {
+                          setState(() {});
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('تم حذف التفعيلة'), backgroundColor: AppTheme.warningColor),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text(
+                'ℹ️ كود التفعيل يُولّد من الطرف المطور وتحديد تاريخ انتهاء الصلاحية.',
+                style: TextStyle(color: Colors.white38, fontSize: 11),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
