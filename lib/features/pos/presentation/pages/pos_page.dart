@@ -809,6 +809,11 @@ class _PosPageState extends State<PosPage> {
           saleId: saleId,
         );
 
+        // كسب نقاط الولاء
+        if (selectedCustomer != null && selectedCustomer!.isNotEmpty) {
+          await DatabaseHelper.instance.earnLoyaltyPoints(selectedCustomer!, total);
+        }
+
         if (mounted) {
           _lastPrintCart = cartSnapshot;
           _lastPrintSubtotal = _subtotal;
@@ -1152,6 +1157,26 @@ class _PosPageState extends State<PosPage> {
                         style: TextStyle(color: AppTheme.warningColor, fontSize: 12),
                       ),
                     ),
+                  if (customerName.isNotEmpty && allCustomerData.any((c) => c['name'] == customerName))
+                    FutureBuilder<int>(
+                      future: DatabaseHelper.instance.getCustomerDiscount(customerName),
+                      builder: (ctx, snap) {
+                        final disc = snap.data ?? 0;
+                        if (disc <= 0) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(color: AppTheme.successColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(Icons.discount, size: 14, color: AppTheme.successColor),
+                              SizedBox(width: 4),
+                              Text('خصم خاص: $disc%', style: TextStyle(color: AppTheme.successColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                            ]),
+                          ),
+                        );
+                      },
+                    ),
                 ],
               ],
             ),
@@ -1205,6 +1230,11 @@ class _PosPageState extends State<PosPage> {
       // حفظ العميل الجديد إذا لم يكن موجوداً
       if (customerName.isNotEmpty && saleId > 0 && !allCustomerData.any((c) => c['name'] == customerName)) {
         await DatabaseHelper.instance.insertCustomer(customerName, phone: customerPhone);
+      }
+
+      // كسب نقاط الولاء
+      if (customerName.isNotEmpty && saleId > 0) {
+        await DatabaseHelper.instance.earnLoyaltyPoints(customerName, total);
       }
 
       if (saleId > 0 && mounted) {

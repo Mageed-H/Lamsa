@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/features/customers/presentation/pages/customer_details_page.dart';
+import 'package:cashier_system/features/customers/presentation/pages/loyalty_settings_page.dart';
 
 class CustomersPage extends StatefulWidget {
   const CustomersPage({Key? key}) : super(key: key);
@@ -47,6 +48,11 @@ class _CustomersPageState extends State<CustomersPage> {
       appBar: AppBar(
         title: const Text('إدارة العملاء', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.star_border),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LoyaltySettingsPage())),
+            tooltip: 'إعدادات الولاء',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadCustomers,

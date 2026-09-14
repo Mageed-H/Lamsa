@@ -15,6 +15,10 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
   Map<String, dynamic> _stats = {};
   List<Map<String, dynamic>> _items = [];
   List<Map<String, dynamic>> _sales = [];
+  List<Map<String, dynamic>> _rewards = [];
+  int _loyaltyPoints = 0;
+  int _discountPercent = 0;
+  int _totalPointsEarned = 0;
 
   @override
   void initState() {
@@ -27,11 +31,19 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
     final stats = await DatabaseHelper.instance.getCustomerStats(widget.customerName);
     final items = await DatabaseHelper.instance.getCustomerItems(widget.customerName);
     final sales = await DatabaseHelper.instance.getCustomerSales(widget.customerName);
+    final rewards = await DatabaseHelper.instance.getCustomerRewards(widget.customerName);
+    final discount = await DatabaseHelper.instance.getCustomerDiscount(widget.customerName);
+    final allCustomers = await DatabaseHelper.instance.getAllCustomers();
+    final custData = allCustomers.firstWhere((c) => c['name'] == widget.customerName, orElse: () => {});
     if (mounted) {
       setState(() {
         _stats = stats;
         _items = items;
         _sales = sales;
+        _rewards = rewards;
+        _discountPercent = discount;
+        _loyaltyPoints = (custData['loyalty_points'] as int?) ?? 0;
+        _totalPointsEarned = (custData['total_points_earned'] as int?) ?? 0;
         _isLoading = false;
       });
     }
@@ -132,30 +144,25 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _stats['total_sales'] == 0
-              ? const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.person_off, size: 48, color: AppTheme.textSecondary),
-                      SizedBox(height: 8),
-                      Text('لا توجد مبيعات لهذا العميل', style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _loadData,
-                  child: ListView(
-                    padding: const EdgeInsets.all(12),
-                    children: [
-                      _buildStatsSection(),
-                      const SizedBox(height: 16),
-                      _buildItemsSection(),
-                      const SizedBox(height: 16),
-                      _buildSalesSection(),
-                    ],
-                  ),
-                ),
+          : RefreshIndicator(
+              onRefresh: _loadData,
+              child: ListView(
+                padding: const EdgeInsets.all(12),
+                children: [
+                  _buildStatsSection(),
+                  const SizedBox(height: 16),
+                  _buildLoyaltySection(),
+                  const SizedBox(height: 16),
+                  if (_items.isNotEmpty) ...[
+                    _buildItemsSection(),
+                    const SizedBox(height: 16),
+                  ],
+                  if (_sales.isNotEmpty) _buildSalesSection(),
+                  if (_sales.isNotEmpty) const SizedBox(height: 16),
+                  if (_rewards.isNotEmpty) _buildRewardsSection(),
+                ],
+              ),
+            ),
     );
   }
 
@@ -206,6 +213,151 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
         const SizedBox(height: 2),
         Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
       ],
+    );
+  }
+
+  Widget _buildLoyaltySection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(Icons.star, color: AppTheme.warningColor),
+              const SizedBox(width: 8),
+              Text('نظام الولاء', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ]),
+            const Divider(),
+            Row(
+              children: [
+                Expanded(child: _statItem('النقاط الحالية', '$_loyaltyPoints', AppTheme.warningColor)),
+                Expanded(child: _statItem('إجمالي النقاط المكتسبة', '$_totalPointsEarned', AppTheme.primaryColor)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(child: _statItem('نسبة الخصم', '$_discountPercent%', AppTheme.successColor)),
+                Expanded(child: _statItem('النقاط المُستخدمة', '${_totalPointsEarned - _loyaltyPoints}', AppTheme.textSecondary)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.discount, size: 16),
+                    label: const Text('تعديل الخصم', style: TextStyle(fontSize: 12)),
+                    onPressed: _showDiscountDialog,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.card_giftcard, size: 16),
+                    label: const Text('إهداء هدية', style: TextStyle(fontSize: 12)),
+                    onPressed: _showGiftDialog,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDiscountDialog() {
+    final ctrl = TextEditingController(text: '$_discountPercent');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('نسبة الخصم الخاصة بالعميل'),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'النسبة المئوية %', suffixText: '%'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          ElevatedButton(
+            onPressed: () async {
+              final val = int.tryParse(ctrl.text) ?? 0;
+              await DatabaseHelper.instance.setCustomerDiscount(widget.customerName, val);
+              Navigator.pop(ctx);
+              _loadData();
+            },
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showGiftDialog() {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('إهداء هدية للعميل'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(labelText: 'وصف الهدية'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          ElevatedButton(
+            onPressed: () async {
+              if (ctrl.text.isNotEmpty) {
+                await DatabaseHelper.instance.giveGiftToCustomer(widget.customerName, ctrl.text);
+                Navigator.pop(ctx);
+                _loadData();
+              }
+            },
+            child: const Text('إهداء'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRewardsSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(Icons.redeem, color: AppTheme.primaryColor),
+              const SizedBox(width: 8),
+              Text('الهدايا والمكافآت (${_rewards.length})', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ]),
+            const Divider(),
+            ..._rewards.map((r) {
+              final type = r['reward_type'] as String? ?? '';
+              final desc = r['description'] as String? ?? '';
+              final pts = r['points_spent'] as int? ?? 0;
+              final date = (r['created_at'] as String? ?? '').substring(0, 10);
+              IconData icon;
+              Color color;
+              switch (type) {
+                case 'auto_gift': icon = Icons.card_giftcard; color = AppTheme.successColor; break;
+                case 'points_discount': icon = Icons.discount; color = AppTheme.primaryColor; break;
+                default: icon = Icons.redeem; color = AppTheme.warningColor;
+              }
+              return ListTile(
+                dense: true,
+                leading: Icon(icon, color: color, size: 20),
+                title: Text(desc, style: const TextStyle(fontSize: 13)),
+                subtitle: pts > 0 ? Text('$pts نقطة', style: const TextStyle(fontSize: 11)) : null,
+                trailing: Text(date, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary)),
+              );
+            }),
+          ],
+        ),
+      ),
     );
   }
 

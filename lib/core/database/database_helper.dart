@@ -79,7 +79,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 17, // الإصدار 17: اسم العميل في المبيعات
+      version: 18, // الإصدار 18: نظام الولاء والهدايا
       onConfigure: _onConfigure, // مفتاح التشفير + العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -134,8 +134,8 @@ class DatabaseHelper {
       // جعل المجلد مخفياً على ويندوز
       if (Platform.isWindows) {
         await Process.run('attrib', ['+h', _backupDir]);
-      }
     }
+  }
 
     final now = DateTime.now();
     final stamp = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}';
@@ -508,6 +508,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 17) {
       await _createV17Tables(db);
+    }
+    if (oldVersion < 18) {
+      await _createV18Tables(db);
     }
   }
 
@@ -968,6 +971,124 @@ class DatabaseHelper {
     } catch (e) {
       return 0;
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // نظام الولاء والهدايا
+  // ═══════════════════════════════════════════════════════════
+
+  Future<Map<String, dynamic>> getLoyaltySettings() async {
+    try {
+      final db = await instance.database;
+      final rows = await db.query('loyalty_settings', where: 'id = 1');
+      return rows.isNotEmpty ? rows.first : {'points_per_dinar': 1, 'points_to_discount': 10, 'discount_per_point': 100, 'gift_threshold': 50, 'gift_description': 'هدايا'};
+    } catch (_) {
+      return {'points_per_dinar': 1, 'points_to_discount': 10, 'discount_per_point': 100, 'gift_threshold': 50, 'gift_description': 'هدايا'};
+    }
+  }
+
+  Future<void> updateLoyaltySettings({int? pointsPerDinar, int? pointsToDiscount, int? discountPerPoint, int? giftThreshold, String? giftDescription}) async {
+    try {
+      final db = await instance.database;
+      final updates = <String, dynamic>{};
+      if (pointsPerDinar != null) updates['points_per_dinar'] = pointsPerDinar;
+      if (pointsToDiscount != null) updates['points_to_discount'] = pointsToDiscount;
+      if (discountPerPoint != null) updates['discount_per_point'] = discountPerPoint;
+      if (giftThreshold != null) updates['gift_threshold'] = giftThreshold;
+      if (giftDescription != null) updates['gift_description'] = giftDescription;
+      if (updates.isNotEmpty) await db.update('loyalty_settings', updates, where: 'id = 1');
+    } catch (_) {}
+  }
+
+  Future<void> earnLoyaltyPoints(String customerName, int totalAmount, {String? saleId}) async {
+    try {
+      final settings = await getLoyaltySettings();
+      final pointsPerDinar = settings['points_per_dinar'] as int;
+      final points = (totalAmount / pointsPerDinar).floor();
+      if (points <= 0) return;
+      final db = await instance.database;
+      await db.rawUpdate('UPDATE customers SET loyalty_points = loyalty_points + ?, total_points_earned = total_points_earned + ?, total_spent = total_spent + ? WHERE name = ?', [points, points, totalAmount, customerName]);
+      final giftThreshold = settings['gift_threshold'] as int;
+      final custRows = await db.query('customers', columns: ['total_points_earned'], where: 'name = ?', whereArgs: [customerName]);
+      if (custRows.isNotEmpty) {
+        final totalEarned = (custRows.first['total_points_earned'] as int?) ?? 0;
+        final giftsCount = totalEarned ~/ giftThreshold;
+        final existingRewards = await db.rawQuery('SELECT COUNT(*) as cnt FROM customer_rewards WHERE customer_name = ? AND reward_type = ?', [customerName, 'auto_gift']);
+        final existingCount = (existingRewards.first['cnt'] as int?) ?? 0;
+        for (var i = existingCount; i < giftsCount; i++) {
+          await db.insert('customer_rewards', {
+            'customer_name': customerName,
+            'reward_type': 'auto_gift',
+            'description': settings['gift_description'],
+            'points_spent': giftThreshold,
+            'created_at': DateTime.now().toIso8601String(),
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<int> spendPointsForDiscount(String customerName, int points) async {
+    try {
+      final db = await instance.database;
+      final rows = await db.query('customers', columns: ['loyalty_points'], where: 'name = ?', whereArgs: [customerName]);
+      if (rows.isEmpty) return 0;
+      final current = (rows.first['loyalty_points'] as int?) ?? 0;
+      if (current < points) return 0;
+      final settings = await getLoyaltySettings();
+      final discountPerPoint = settings['discount_per_point'] as int;
+      final discountAmount = points * discountPerPoint;
+      await db.rawUpdate('UPDATE customers SET loyalty_points = loyalty_points - ? WHERE name = ?', [points, customerName]);
+      await db.insert('customer_rewards', {
+        'customer_name': customerName,
+        'reward_type': 'points_discount',
+        'description': 'خصم $discountAmount د.ع من $points نقاط',
+        'points_spent': points,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      return discountAmount;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<void> giveGiftToCustomer(String customerName, String description) async {
+    try {
+      final db = await instance.database;
+      await db.insert('customer_rewards', {
+        'customer_name': customerName,
+        'reward_type': 'manual_gift',
+        'description': description,
+        'points_spent': 0,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (_) {}
+  }
+
+  Future<List<Map<String, dynamic>>> getCustomerRewards(String customerName) async {
+    try {
+      final db = await instance.database;
+      return await db.query('customer_rewards', where: 'customer_name = ?', whereArgs: [customerName], orderBy: 'created_at DESC');
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<int> getCustomerDiscount(String customerName) async {
+    try {
+      final db = await instance.database;
+      final rows = await db.query('customers', columns: ['discount_percent'], where: 'name = ?', whereArgs: [customerName]);
+      return rows.isNotEmpty ? (rows.first['discount_percent'] as int?) ?? 0 : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<void> setCustomerDiscount(String customerName, int discountPercent) async {
+    try {
+      final db = await instance.database;
+      await db.update('customers', {'discount_percent': discountPercent.clamp(0, 100)}, where: 'name = ?', whereArgs: [customerName]);
+    } catch (_) {}
   }
 
   // ==========================================================
@@ -1661,6 +1782,38 @@ class DatabaseHelper {
   Future _createV17Tables(Database db) async {
     try { await db.execute('ALTER TABLE sales ADD COLUMN customer_name TEXT DEFAULT \'\''); } catch (_) {}
     await db.execute('CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales (customer_name);');
+  }
+
+  // ==========================================================
+  // الإصدار 18: نظام الولاء والهدايا
+  // ==========================================================
+  Future _createV18Tables(Database db) async {
+    try { await db.execute('ALTER TABLE customers ADD COLUMN loyalty_points INTEGER DEFAULT 0'); } catch (_) {}
+    try { await db.execute('ALTER TABLE customers ADD COLUMN discount_percent INTEGER DEFAULT 0'); } catch (_) {}
+    try { await db.execute('ALTER TABLE customers ADD COLUMN total_spent INTEGER DEFAULT 0'); } catch (_) {}
+    try { await db.execute('ALTER TABLE customers ADD COLUMN total_points_earned INTEGER DEFAULT 0'); } catch (_) {}
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS customer_rewards (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_name  TEXT NOT NULL,
+        reward_type    TEXT NOT NULL DEFAULT 'gift',
+        description    TEXT NOT NULL DEFAULT '',
+        points_spent   INTEGER NOT NULL DEFAULT 0,
+        created_at     TEXT NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_cr_customer ON customer_rewards (customer_name);');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS loyalty_settings (
+        id                INTEGER PRIMARY KEY CHECK (id = 1),
+        points_per_dinar  INTEGER NOT NULL DEFAULT 1,
+        points_to_discount INTEGER NOT NULL DEFAULT 10,
+        discount_per_point INTEGER NOT NULL DEFAULT 100,
+        gift_threshold     INTEGER NOT NULL DEFAULT 50,
+        gift_description   TEXT NOT NULL DEFAULT 'هدايا'
+      )
+    ''');
+    await db.execute('INSERT OR IGNORE INTO loyalty_settings (id) VALUES (1)');
   }
 
   /// تصحيح جرد منتج يدوياً مع تسجيل السبب
