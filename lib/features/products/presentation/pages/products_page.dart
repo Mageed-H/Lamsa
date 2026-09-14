@@ -955,9 +955,11 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                 icon: const Icon(Icons.more_vert, color: Colors.white),
                 onSelected: (v) {
                   if (v == 'low_stock') _exportLowStockPdf();
+                  if (v == 'adjustment_log') _showAllAdjustmentLog();
                 },
                 itemBuilder: (_) => const [
                   PopupMenuItem(value: 'low_stock', child: Row(children: [Icon(Icons.warning_amber, size: 18, color: AppTheme.errorColor), SizedBox(width: 8), Text('تصدير المنتجات قليلة المخزون')])),
+                  PopupMenuItem(value: 'adjustment_log', child: Row(children: [Icon(Icons.history, size: 18, color: AppTheme.primaryColor), SizedBox(width: 8), Text('سجل تصحيحات الجرد')])),
                 ],
               ),
             if (_tabController.index == 1 && _isSelectionMode) ...[
@@ -2487,7 +2489,6 @@ trailing: _isSelectionMode
           );
         }
       }
-      return;
     }
 
     // ─── إضافة / خصم / تعيين كمية ───
@@ -2681,6 +2682,59 @@ trailing: _isSelectionMode
             );
           }),
         ],
+      ),
+    );
+  }
+
+  Future<void> _showAllAdjustmentLog() async {
+    final adjustments = await DatabaseHelper.instance.getAllAdjustments();
+    if (!mounted) return;
+    if (adjustments.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('لا توجد تصحيحات جرد بعد'), backgroundColor: AppTheme.textSecondary));
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.9,
+        minChildSize: 0.4,
+        expand: false,
+        builder: (ctx, scrollCtrl) => Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: Text('سجل تصحيحات الجرد', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.primaryColor))),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollCtrl,
+                itemCount: adjustments.length,
+                itemBuilder: (ctx, i) {
+                  final a = adjustments[i];
+                  final name = a['product_name'] as String? ?? 'منتج محذوف';
+                  final diff = a['difference'] as int? ?? 0;
+                  final oldStock = a['old_stock'] as int? ?? 0;
+                  final newStock = a['new_stock'] as int? ?? 0;
+                  final reason = a['reason'] as String? ?? '';
+                  final date = (a['created_at'] as String? ?? '').substring(0, 16).replaceAll('T', ' ');
+                  return ListTile(
+                    leading: Icon(
+                      diff > 0 ? Icons.add_circle : Icons.remove_circle,
+                      color: diff > 0 ? AppTheme.successColor : AppTheme.errorColor,
+                    ),
+                    title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    subtitle: Text('$oldStock ← $newStock  |  $reason', style: const TextStyle(fontSize: 11)),
+                    trailing: Text(date, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary)),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
