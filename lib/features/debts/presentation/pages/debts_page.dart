@@ -62,7 +62,8 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
     setState(() => _isLoading = true);
     final debts = await DatabaseHelper.instance.getAllDebts();
     final grouped = await DatabaseHelper.instance.getDebtsGroupedByName();
-    final names = await DatabaseHelper.instance.getDebtCustomerNames();
+    final debtNames = await DatabaseHelper.instance.getDebtCustomerNames();
+    final dbCustomerNames = await DatabaseHelper.instance.getCustomerNames();
     final summary = await DatabaseHelper.instance.getDebtsSummary();
     final shopDebts = await DatabaseHelper.instance.getAllShopDebts();
     final shopSummary = await DatabaseHelper.instance.getShopDebtsSummary();
@@ -70,7 +71,7 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
       setState(() {
         _debts = debts;
         _groupedDebts = grouped;
-        _customerNames = names;
+        _customerNames = {...dbCustomerNames, ...debtNames}.toList()..sort();
         _summary = summary;
         _shopDebts = shopDebts;
         _shopSummary = shopSummary;

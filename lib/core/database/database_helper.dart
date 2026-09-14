@@ -79,7 +79,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 16, // الإصدار 16: جدول العملاء
+      version: 17, // الإصدار 17: اسم العميل في المبيعات
       onConfigure: _onConfigure, // مفتاح التشفير + العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -498,11 +498,16 @@ class DatabaseHelper {
       await _createV14Tables(db);
     }
     if (oldVersion < 15) {
-      await _createV15Tables(db);
+    await _createV15Tables(db);
+    await _createV16Tables(db);
+    await _createV17Tables(db);
       await _createV16Tables(db);
     }
     if (oldVersion < 16) {
       await _createV16Tables(db);
+    }
+    if (oldVersion < 17) {
+      await _createV17Tables(db);
     }
   }
 
@@ -1158,7 +1163,7 @@ class DatabaseHelper {
   // ==========================================================
 
   /// إتمام عملية البيع: حفظ الفاتورة + تخفيض المخزون (Transactional)
-  Future<int> completeSale(List<Map<String, dynamic>> cart, {int discountValue = 0}) async {
+  Future<int> completeSale(List<Map<String, dynamic>> cart, {int discountValue = 0, String customerName = ''}) async {
     try {
     final db = await instance.database;
     int saleId = -1;
@@ -1190,6 +1195,7 @@ class DatabaseHelper {
         'items_count': itemsCount,
         'discount_amount': discountValue,
         'receipt_number': receiptNumber,
+        'customer_name': customerName.trim(),
         'created_at': DateTime.now().toIso8601String(),
       });
 
@@ -1291,6 +1297,93 @@ class DatabaseHelper {
           where: "receipt_number LIKE ?",
           whereArgs: ['%$query%'],
           orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// ربط عميل بفاتورة موجودة
+  Future<bool> assignCustomerToSale(int saleId, String customerName) async {
+    try {
+      final db = await instance.database;
+      await db.update('sales', {'customer_name': customerName.trim()}, where: 'id = ?', whereArgs: [saleId]);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// جلب مبيعات عميل معين
+  Future<List<Map<String, dynamic>>> getSalesByCustomer(String customerName) async {
+    try {
+      final db = await instance.database;
+      return await db.query('sales',
+          where: 'customer_name = ?', whereArgs: [customerName],
+          orderBy: 'created_at DESC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// إحصائيات عميل
+  Future<Map<String, dynamic>> getCustomerStats(String customerName) async {
+    try {
+      final db = await instance.database;
+      final result = await db.rawQuery('''
+        SELECT 
+          COUNT(*) as total_sales,
+          COALESCE(SUM(total_amount), 0) as total_spent,
+          COALESCE(SUM(total_profit), 0) as total_profit,
+          COALESCE(SUM(items_count), 0) as total_items
+        FROM sales WHERE customer_name = ?
+      ''', [customerName]);
+      return result.first;
+    } catch (e) {
+      return {'total_sales': 0, 'total_spent': 0, 'total_profit': 0, 'total_items': 0};
+    }
+  }
+
+  /// المنتجات التي اشتراها العميل مع التفاصيل
+  Future<List<Map<String, dynamic>>> getCustomerItems(String customerName) async {
+    try {
+      final db = await instance.database;
+      return await db.rawQuery('''
+        SELECT si.product_name, SUM(si.quantity) as total_qty,
+               si.unit_price, si.purchase_price,
+               SUM(si.unit_price * si.quantity) as total_cost,
+               SUM((si.unit_price - si.purchase_price) * si.quantity) as item_profit
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        WHERE s.customer_name = ?
+        GROUP BY si.product_name, si.unit_price, si.purchase_price
+        ORDER BY total_qty DESC
+      ''', [customerName]);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// فواتير عميل مع التفاصيل
+  Future<List<Map<String, dynamic>>> getCustomerSales(String customerName) async {
+    try {
+      final db = await instance.database;
+      return await db.rawQuery('''
+        SELECT s.id, s.total_amount, s.total_profit, s.items_count,
+               s.discount_amount, s.receipt_number, s.created_at
+        FROM sales s WHERE s.customer_name = ?
+        ORDER BY s.created_at DESC
+      ''', [customerName]);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// قائمة العملاء الذين لديهم مبيعات
+  Future<List<String>> getCustomerNamesWithSales() async {
+    try {
+      final db = await instance.database;
+      final rows = await db.rawQuery("SELECT DISTINCT customer_name FROM sales WHERE customer_name != '' ORDER BY customer_name");
+      return rows.map((r) => r['customer_name'] as String).toList();
     } catch (e) {
       return [];
     }
@@ -1560,6 +1653,14 @@ class DatabaseHelper {
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_cust_name ON customers (name);');
+  }
+
+  // ==========================================================
+  // الإصدار 17: اسم العميل في المبيعات
+  // ==========================================================
+  Future _createV17Tables(Database db) async {
+    try { await db.execute('ALTER TABLE sales ADD COLUMN customer_name TEXT DEFAULT \'\''); } catch (_) {}
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales (customer_name);');
   }
 
   /// تصحيح جرد منتج يدوياً مع تسجيل السبب

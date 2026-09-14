@@ -729,6 +729,7 @@ class _SalesPageState extends State<SalesPage> {
     final receiptNumber = sale['receipt_number'] as String? ?? 'R${saleId.toString().padLeft(6, '0')}';
     final createdAt = (sale['created_at'] as String? ?? '').replaceAll('T', '  ');
     final timeStr = createdAt.length >= 16 ? createdAt.substring(0, 16) : createdAt;
+    final saleCustomerName = sale['customer_name'] as String? ?? '';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -753,14 +754,21 @@ class _SalesPageState extends State<SalesPage> {
             ],
           ],
         ),
-        subtitle: Text('$receiptNumber  |  ربح: $totalProfit د  |  $timeStr', style: const TextStyle(fontSize: 12)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$receiptNumber  |  ربح: $totalProfit د  |  $timeStr', style: const TextStyle(fontSize: 12)),
+            if (saleCustomerName.isNotEmpty)
+              Text('👤 $saleCustomerName', style: TextStyle(fontSize: 12, color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+          ],
+        ),
         trailing: const Icon(Icons.chevron_left, color: AppTheme.textSecondary),
-        onTap: () => _showSaleDetails(saleId, totalAmount, discountAmount, timeStr),
+        onTap: () => _showSaleDetails(saleId, totalAmount, discountAmount, timeStr, saleCustomerName),
       ),
     );
   }
 
-  Future<void> _showSaleDetails(int saleId, int totalAmount, int discountAmount, String time) async {
+  Future<void> _showSaleDetails(int saleId, int totalAmount, int discountAmount, String time, [String customerName = '']) async {
     final items = await DatabaseHelper.instance.getSaleItems(saleId);
     if (!mounted) return;
     showModalBottomSheet(
@@ -772,6 +780,7 @@ class _SalesPageState extends State<SalesPage> {
         totalAmount: totalAmount,
         discountAmount: discountAmount,
         time: time,
+        customerName: customerName,
         items: items,
         onReturnDone: () {
           _loadData();
@@ -795,6 +804,7 @@ class _SaleDetailsSheet extends StatefulWidget {
   final int totalAmount;
   final int discountAmount;
   final String time;
+  final String customerName;
   final List<Map<String, dynamic>> items;
   final VoidCallback onReturnDone;
 
@@ -803,6 +813,7 @@ class _SaleDetailsSheet extends StatefulWidget {
     required this.totalAmount,
     required this.discountAmount,
     required this.time,
+    this.customerName = '',
     required this.items,
     required this.onReturnDone,
   });
@@ -815,10 +826,12 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
   late Map<int, int> _returnQtys;
   bool _isReturning = false;
   bool _isPrinting = false;
+  late String _currentCustomer;
 
   @override
   void initState() {
     super.initState();
+    _currentCustomer = widget.customerName;
     _returnQtys = {
       for (final item in widget.items) item['id'] as int: 0,
     };
@@ -1072,6 +1085,73 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
     }
   }
 
+  Future<void> _assignCustomer() async {
+    final customerCtrl = TextEditingController(text: _currentCustomer);
+    List<String> suggestions = [];
+    try {
+      final allCustomers = await DatabaseHelper.instance.getCustomerNames();
+      final allDebtorNames = await DatabaseHelper.instance.getDebtCustomerNames();
+      suggestions = {...allCustomers, ...allDebtorNames}.toList()..sort();
+    } catch (_) {}
+    if (!mounted) return;
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('ربط العميل بالفاتورة'),
+          content: Autocomplete<String>(
+            optionsBuilder: (TextEditingValue tev) {
+              if (tev.text.isEmpty) return const Iterable<String>.empty();
+              return suggestions.where((s) => s.contains(tev.text));
+            },
+            onSelected: (val) {
+              customerCtrl.text = val;
+              setDialogState(() {});
+            },
+            fieldViewBuilder: (context, fc, fn, onSubmitted) {
+              return TextField(
+                controller: fc,
+                focusNode: fn,
+                decoration: InputDecoration(
+                  labelText: 'اسم العميل',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: fc.text.isNotEmpty
+                      ? IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: () { fc.clear(); setDialogState(() {}); })
+                      : null,
+                ),
+                onChanged: (_) => setDialogState(() {}),
+              );
+            },
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('إلغاء')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, ''),
+              child: const Text('إزالة اسم العميل', style: TextStyle(color: AppTheme.errorColor)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, customerCtrl.text.trim()),
+              child: const Text('حفظ'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      final ok = await DatabaseHelper.instance.assignCustomerToSale(widget.saleId, result);
+      if (ok) setState(() => _currentCustomer = result);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.isEmpty ? 'تم إزالة اسم العميل' : 'تم ربط الفاتورة بالعميل "$result"'),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -1098,6 +1178,17 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
               ),
             ],
           ),
+          if (_currentCustomer.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.person, size: 14, color: AppTheme.primaryColor),
+                  const SizedBox(width: 4),
+                  Text(_currentCustomer, style: const TextStyle(fontSize: 13, color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
           const Divider(),
           // بنود الفاتورة مع أزرار إرجاع جزئي
           ...widget.items.map((item) {
@@ -1207,8 +1298,25 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
             ),
             const SizedBox(height: 8),
           ],
+          // زر ربط العميل
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.primaryColor,
+                side: const BorderSide(color: AppTheme.primaryColor),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+              icon: Icon(_currentCustomer.isNotEmpty ? Icons.person : Icons.person_add, size: 18),
+              label: Text(
+                _currentCustomer.isNotEmpty ? 'تغيير العميل ($_currentCustomer)' : 'ربط بعميل',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onPressed: _assignCustomer,
+            ),
+          ),
+          const SizedBox(height: 8),
           // زر الإرجاع
-          // زر إرجاع الكل (يحدد كل المنتجات دفعة واحدة)
           if (!_isReturnAll)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),

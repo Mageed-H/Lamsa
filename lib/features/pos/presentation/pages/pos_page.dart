@@ -795,7 +795,7 @@ class _PosPageState extends State<PosPage> {
     // تنفيذ البيع بالدين
     try {
       final cartSnapshot = List<Map<String, dynamic>>.from(_cart);
-      final saleId = await DatabaseHelper.instance.completeSale(_cart, discountValue: discountVal);
+      final saleId = await DatabaseHelper.instance.completeSale(_cart, discountValue: discountVal, customerName: selectedCustomer ?? '');
 
       if (saleId > 0) {
         // إنشاء الدين مرتبط بالفاتورة
@@ -864,6 +864,15 @@ class _PosPageState extends State<PosPage> {
     final int total = _finalTotal;
     final amountController = TextEditingController(text: '$total');
     bool shouldPrint = true;
+    bool isCustomer = false;
+    String customerName = '';
+    final customerCtrl = TextEditingController();
+    List<String> customerSuggestions = [];
+
+    // تحميل أسماء العملاء
+    final allCustomers = await DatabaseHelper.instance.getCustomerNames();
+    final allDebtorNames = await DatabaseHelper.instance.getDebtCustomerNames();
+    customerSuggestions = {...allCustomers, ...allDebtorNames}.toList()..sort();
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1025,6 +1034,76 @@ class _PosPageState extends State<PosPage> {
                     ],
                   ),
                 ),
+                // خيار العميل
+                GestureDetector(
+                  onTap: () => setDialogState(() {
+                    isCustomer = !isCustomer;
+                    if (!isCustomer) customerName = '';
+                  }),
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: isCustomer,
+                        onChanged: (v) => setDialogState(() {
+                          isCustomer = v ?? false;
+                          if (!isCustomer) customerName = '';
+                        }),
+                        activeColor: AppTheme.primaryColor,
+                      ),
+                      const Icon(Icons.person, size: 18, color: AppTheme.textSecondary),
+                      const SizedBox(width: 4),
+                      const Text('عميل', style: TextStyle(fontSize: 15)),
+                    ],
+                  ),
+                ),
+                if (isCustomer) ...[
+                  const SizedBox(height: 8),
+                  Autocomplete<String>(
+                    optionsBuilder: (TextEditingValue textEditingValue) {
+                      if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
+                      return customerSuggestions.where((s) => s.contains(textEditingValue.text));
+                    },
+                    onSelected: (val) {
+                      customerName = val;
+                      customerCtrl.text = val;
+                      setDialogState(() {});
+                    },
+                    fieldViewBuilder: (context, fieldController, focusNode, onSubmitted) {
+                      return TextField(
+                        controller: fieldController,
+                        focusNode: focusNode,
+                        decoration: InputDecoration(
+                          labelText: 'اسم العميل',
+                          hintText: 'ابحث بالاسم أو الجوال...',
+                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.person, size: 18),
+                          suffixIcon: customerName.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 18),
+                                  onPressed: () {
+                                    fieldController.clear();
+                                    customerName = '';
+                                    setDialogState(() {});
+                                  },
+                                )
+                              : null,
+                        ),
+                        onChanged: (val) {
+                          customerName = val;
+                          setDialogState(() {});
+                        },
+                      );
+                    },
+                  ),
+                  if (customerName.isNotEmpty && !customerSuggestions.contains(customerName))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'سيتم إضافة "$customerName" كعميل جديد',
+                        style: TextStyle(color: AppTheme.warningColor, fontSize: 12),
+                      ),
+                    ),
+                ],
               ],
             ),
             actions: [
@@ -1071,6 +1150,7 @@ class _PosPageState extends State<PosPage> {
       final saleId = await DatabaseHelper.instance.completeSale(
         _cart,
         discountValue: discountVal,
+        customerName: customerName,
       );
 
       if (saleId > 0 && mounted) {

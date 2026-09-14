@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
+import 'package:cashier_system/features/customers/presentation/pages/customer_details_page.dart';
 
 class CustomersPage extends StatefulWidget {
   const CustomersPage({Key? key}) : super(key: key);
@@ -143,6 +144,12 @@ class _CustomersPageState extends State<CustomersPage> {
           [if (phone.isNotEmpty) phone, if (address.isNotEmpty) address].join(' | '),
           style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
         ),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => CustomerDetailsPage(customerName: name)),
+          );
+        },
         trailing: PopupMenuButton<String>(
           onSelected: (v) {
             if (v == 'edit') _showEditDialog(customer);
