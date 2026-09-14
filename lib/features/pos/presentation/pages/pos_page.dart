@@ -867,13 +867,15 @@ class _PosPageState extends State<PosPage> {
     if (_cart.isEmpty) return;
 
     final int subtotal = _subtotal;
-    final int discountVal = _discountValue;
-    final int total = _finalTotal;
+    int discountVal = _discountValue;
+    int total = _finalTotal;
     final amountController = TextEditingController(text: '$total');
     bool shouldPrint = true;
     bool isCustomer = false;
     String customerName = '';
     String customerPhone = '';
+    bool applyCustomerDiscount = false;
+    int customerDiscountPercent = 0;
     final customerCtrl = TextEditingController();
     List<Map<String, dynamic>> allCustomerData = [];
 
@@ -1115,6 +1117,10 @@ class _PosPageState extends State<PosPage> {
                         onChanged: (val) {
                           customerName = val;
                           customerPhone = '';
+                          applyCustomerDiscount = false;
+                          discountVal = _discountValue;
+                          total = subtotal - discountVal;
+                          amountController.text = '$total';
                           setDialogState(() {});
                         },
                       );
@@ -1163,16 +1169,46 @@ class _PosPageState extends State<PosPage> {
                       builder: (ctx, snap) {
                         final disc = snap.data ?? 0;
                         if (disc <= 0) return const SizedBox.shrink();
+                        if (!applyCustomerDiscount) customerDiscountPercent = disc;
                         return Padding(
                           padding: const EdgeInsets.only(top: 6),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(color: AppTheme.successColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                            child: Row(mainAxisSize: MainAxisSize.min, children: [
-                              Icon(Icons.discount, size: 14, color: AppTheme.successColor),
-                              SizedBox(width: 4),
-                              Text('خصم خاص: $disc%', style: TextStyle(color: AppTheme.successColor, fontWeight: FontWeight.bold, fontSize: 12)),
-                            ]),
+                          child: GestureDetector(
+                            onTap: () {
+                              setDialogState(() {
+                                applyCustomerDiscount = !applyCustomerDiscount;
+                                if (applyCustomerDiscount) {
+                                  discountVal = _discountValue + (subtotal * customerDiscountPercent ~/ 100);
+                                } else {
+                                  discountVal = _discountValue;
+                                }
+                                total = subtotal - discountVal;
+                                amountController.text = '$total';
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: applyCustomerDiscount ? AppTheme.successColor : AppTheme.successColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppTheme.successColor),
+                              ),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                Icon(
+                                  applyCustomerDiscount ? Icons.check_circle : Icons.discount,
+                                  size: 14,
+                                  color: applyCustomerDiscount ? Colors.white : AppTheme.successColor,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  applyCustomerDiscount ? 'خصم $disc% مطبق ✓' : 'خصم خاص: $disc%',
+                                  style: TextStyle(
+                                    color: applyCustomerDiscount ? Colors.white : AppTheme.successColor,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ]),
+                            ),
                           ),
                         );
                       },
