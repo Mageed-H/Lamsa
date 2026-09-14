@@ -894,6 +894,18 @@ class _PosPageState extends State<PosPage> {
       }
     }
 
+    void recalcTotal(int subtotal, TextEditingController ctrl) {
+      discountVal = _discountValue;
+      if (applyCustomerDiscount) {
+        discountVal += subtotal * customerDiscountPercent ~/ 100;
+      }
+      if (usePointsDiscount) {
+        discountVal += pointsDiscountAmount;
+      }
+      total = subtotal - discountVal;
+      ctrl.text = '$total';
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -1180,13 +1192,7 @@ class _PosPageState extends State<PosPage> {
                             onTap: () {
                               setDialogState(() {
                                 applyCustomerDiscount = !applyCustomerDiscount;
-                                if (applyCustomerDiscount) {
-                                  discountVal = _discountValue + (subtotal * customerDiscountPercent ~/ 100);
-                                } else {
-                                  discountVal = _discountValue;
-                                }
-                                total = subtotal - discountVal;
-                                amountController.text = '$total';
+                                recalcTotal(subtotal, amountController);
                               });
                             },
                             child: Container(
@@ -1229,23 +1235,8 @@ class _PosPageState extends State<PosPage> {
                             onTap: () {
                               setDialogState(() {
                                 usePointsDiscount = !usePointsDiscount;
-                                if (usePointsDiscount) {
-                                  final settings = <String, dynamic>{};
-                                  final dpp = 100;
-                                  pointsDiscountAmount = pts * dpp;
-                                  discountVal = _discountValue + pointsDiscountAmount;
-                                  if (applyCustomerDiscount) {
-                                    discountVal += subtotal * customerDiscountPercent ~/ 100;
-                                  }
-                                } else {
-                                  pointsDiscountAmount = 0;
-                                  discountVal = _discountValue;
-                                  if (applyCustomerDiscount) {
-                                    discountVal += subtotal * customerDiscountPercent ~/ 100;
-                                  }
-                                }
-                                total = subtotal - discountVal;
-                                amountController.text = '$total';
+                                pointsDiscountAmount = usePointsDiscount ? pts * 100 : 0;
+                                recalcTotal(subtotal, amountController);
                               });
                             },
                             child: Container(
