@@ -80,6 +80,11 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
   final _bulkBuyPriceController = TextEditingController();
   int _bulkPriceMode = 2; // 0=زيادة%, 1=خصم%, 2=سعر ثابت
 
+  // سحب لتحديد_RANGE
+  final GlobalKey _listKey = GlobalKey();
+  int _dragAnchorIndex = -1;
+  bool _isDragSelecting = false;
+
   // ─── الفلاتر والترتيب ───
   Map<int, Map<String, dynamic>> _productSalesStats = {};
   String _sortBy = 'name'; // name, price, stock, profit, sold, lastSold
@@ -1434,10 +1439,11 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                           ),
                         )
                       : ListView.builder(
+                      key: _listKey,
                       controller: _listScrollController,
                       itemExtent: 96.0,
                       itemCount: filteredProducts.length,
-itemBuilder: (context, index) {
+                      itemBuilder: (context, index) {
                           final p = filteredProducts[index];
                           final profit = p.price - p.purchasePrice;
                           final isHighlighted = _highlightedProductIndex == index;
@@ -1469,31 +1475,51 @@ itemBuilder: (context, index) {
                             ),
                             child: Material(
                               type: MaterialType.transparency,
-                              child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                              onLongPress: () {
+                              child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onLongPressStart: (details) {
                                 final pid = p.id;
                                 if (pid == null) return;
-                                if (!_isSelectionMode) {
-                                  setState(() {
+                                setState(() {
+                                  _isDragSelecting = true;
+                                  _dragAnchorIndex = index;
+                                  if (!_isSelectionMode) {
                                     _isSelectionMode = true;
-                                    _selectedProductIds.add(pid);
-                                  });
-                                  _selectionAnimController.forward();
-                                } else {
+                                    _selectionAnimController.forward();
+                                  }
+                                  _selectedProductIds.add(pid);
+                                });
+                              },
+                              onLongPressMoveUpdate: (details) {
+                                if (!_isDragSelecting || _dragAnchorIndex < 0) return;
+                                final listObj = _listKey.currentContext?.findRenderObject();
+                                if (listObj == null || !listObj.attached) return;
+                                final listBox = listObj as RenderBox;
+                                final listTop = listBox.localToGlobal(Offset.zero).dy;
+                                final scrollOffset = _listScrollController.hasClients ? _listScrollController.offset : 0.0;
+                                final fingerY = details.globalPosition.dy - listTop + scrollOffset;
+                                final currentIndex = (fingerY / 96.0).floor().clamp(0, filteredProducts.length - 1);
+                                final start = _dragAnchorIndex < currentIndex ? _dragAnchorIndex : currentIndex;
+                                final end = _dragAnchorIndex < currentIndex ? currentIndex : _dragAnchorIndex;
+                                setState(() {
+                                  for (var i = start; i <= end; i++) {
+                                    final id = filteredProducts[i].id;
+                                    if (id != null) _selectedProductIds.add(id);
+                                  }
+                                });
+                              },
+                              onLongPressEnd: (_) {
+                                _isDragSelecting = false;
+                                _dragAnchorIndex = -1;
+                                if (_selectedProductIds.isEmpty && _isSelectionMode) {
                                   setState(() {
-                                    if (_selectedProductIds.contains(pid)) {
-                                      _selectedProductIds.remove(pid);
-                                      if (_selectedProductIds.isEmpty) {
-                                        _isSelectionMode = false;
-                                        _selectionAnimController.reverse();
-                                      }
-                                    } else {
-                                      _selectedProductIds.add(pid);
-                                    }
+                                    _isSelectionMode = false;
+                                    _selectionAnimController.reverse();
                                   });
                                 }
                               },
+                              child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                               leading: _isSelectionMode
                                   ? AnimatedContainer(
                                       duration: const Duration(milliseconds: 200),
@@ -1612,11 +1638,12 @@ trailing: _isSelectionMode
                                           onPressed: () => _confirmDelete(p),
                                           tooltip: 'حذف',
                                         ),
-                                       ],
-                                    ),
-                          ),
-                          ),
-                        );
+                                        ],
+                                     ),
+                           ), // ListTile
+                           ), // GestureDetector
+                           ), // Material
+                         );
                       },
                      ),
         ),
@@ -2515,9 +2542,10 @@ trailing: _isSelectionMode
       final db = await DatabaseHelper.instance.database;
       await db.transaction((txn) async {
         for (final id in _selectedProductIds) {
-          final rows = await txn.query('products', columns: ['stock'], where: 'id = ?', whereArgs: [id]);
+          final rows = await txn.query('products', columns: ['stock', 'name'], where: 'id = ?', whereArgs: [id]);
           if (rows.isEmpty) continue;
           final currentStock = (rows.first['stock'] as int?) ?? 0;
+          final productName = (rows.first['name'] as String?) ?? '';
           int newStock;
           switch (_bulkOperationType) {
             case 0: newStock = currentStock + qty; break;
@@ -2525,6 +2553,15 @@ trailing: _isSelectionMode
             default: newStock = qty;
           }
           await txn.update('products', {'stock': newStock}, where: 'id = ?', whereArgs: [id]);
+          await txn.insert('stock_adjustments', {
+            'product_id': id,
+            'product_name': productName,
+            'old_stock': currentStock,
+            'new_stock': newStock,
+            'difference': newStock - currentStock,
+            'reason': 'جمع: $opName $qty',
+            'created_at': DateTime.now().toIso8601String(),
+          });
         }
       });
       if (mounted) {
