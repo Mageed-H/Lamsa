@@ -79,7 +79,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 15, // الإصدار 15: سجل الحذف والاسترجاع
+      version: 16, // الإصدار 16: جدول العملاء
       onConfigure: _onConfigure, // مفتاح التشفير + العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -499,6 +499,10 @@ class DatabaseHelper {
     }
     if (oldVersion < 15) {
       await _createV15Tables(db);
+      await _createV16Tables(db);
+    }
+    if (oldVersion < 16) {
+      await _createV16Tables(db);
     }
   }
 
@@ -890,6 +894,74 @@ class DatabaseHelper {
       return rows > 0;
     } catch (e) {
       return false;
+    }
+  }
+
+  // ==========================================================
+  // دوال العملاء (Customers)
+  // ==========================================================
+
+  Future<int> insertCustomer(String name, {String phone = '', String address = '', String notes = ''}) async {
+    try {
+      final db = await instance.database;
+      // تحقق من عدم التكرار
+      final existing = await db.query('customers', where: 'name = ?', whereArgs: [name.trim()]);
+      if (existing.isNotEmpty) return -1;
+      return await db.insert('customers', {
+        'name': name.trim(),
+        'phone': phone.trim(),
+        'address': address.trim(),
+        'notes': notes.trim(),
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      return -1;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getAllCustomers() async {
+    try {
+      final db = await instance.database;
+      return await db.query('customers', orderBy: 'name ASC');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<List<String>> getCustomerNames() async {
+    try {
+      final db = await instance.database;
+      final rows = await db.rawQuery("SELECT name FROM customers ORDER BY name ASC");
+      return rows.map((r) => r['name'] as String).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<int> updateCustomer(int id, {String? name, String? phone, String? address, String? notes}) async {
+    try {
+      final db = await instance.database;
+      final updates = <String, dynamic>{};
+      if (name != null) updates['name'] = name.trim();
+      if (phone != null) updates['phone'] = phone.trim();
+      if (address != null) updates['address'] = address.trim();
+      if (notes != null) updates['notes'] = notes.trim();
+      if (updates.isEmpty) return 0;
+      return await db.update('customers', updates, where: 'id = ?', whereArgs: [id]);
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  Future<int> deleteCustomer(int id) async {
+    try {
+      final db = await instance.database;
+      // تحقق إذا عند ديون
+      final debts = await db.query('debts', where: 'customer_name = (SELECT name FROM customers WHERE id = ?)', whereArgs: [id]);
+      if (debts.isNotEmpty) return -2; // له ديون
+      return await db.delete('customers', where: 'id = ?', whereArgs: [id]);
+    } catch (e) {
+      return 0;
     }
   }
 
@@ -1471,6 +1543,23 @@ class DatabaseHelper {
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_dl_product ON delete_log (product_id);');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_dl_date ON delete_log (deleted_at);');
+  }
+
+  // ==========================================================
+  // جدول العملاء (v16)
+  // ==========================================================
+  Future _createV16Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS customers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT DEFAULT '',
+        address TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_cust_name ON customers (name);');
   }
 
   /// تصحيح جرد منتج يدوياً مع تسجيل السبب

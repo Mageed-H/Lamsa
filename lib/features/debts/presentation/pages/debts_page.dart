@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/features/shop_debts/presentation/pages/shop_debts_page.dart';
+import 'package:cashier_system/features/customers/presentation/pages/customers_page.dart';
 
 class DebtsPage extends StatefulWidget {
   const DebtsPage({Key? key}) : super(key: key);
@@ -786,8 +787,12 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
             icon: const Icon(Icons.more_vert),
             onSelected: (v) {
               if (v == 'pdf') _exportDebtsPdf();
+              if (v == 'customers') {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomersPage()));
+              }
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'customers', child: Row(children: [Icon(Icons.people, size: 18), SizedBox(width: 8), Text('إدارة العملاء')])),
               PopupMenuItem(value: 'pdf', child: Row(children: [Icon(Icons.picture_as_pdf, size: 18), SizedBox(width: 8), Text('تصدير PDF')])),
             ],
           ),
