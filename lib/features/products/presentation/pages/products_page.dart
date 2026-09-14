@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -84,6 +85,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
   final GlobalKey _listKey = GlobalKey();
   int _dragAnchorIndex = -1;
   bool _isDragSelecting = false;
+  Timer? _autoScrollTimer;
+  double _autoScrollDirection = 0; // -1=أعلى, 1=أسفل, 0=إيقاف
 
   // ─── الفلاتر والترتيب ───
   Map<int, Map<String, dynamic>> _productSalesStats = {};
@@ -169,6 +172,7 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
     _bulkQtyController.dispose();
     _bulkSellPriceController.dispose();
     _bulkBuyPriceController.dispose();
+    _autoScrollTimer?.cancel();
     super.dispose();
   }
 
@@ -1496,8 +1500,10 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                                 if (listObj == null || !listObj.attached) return;
                                 final listBox = listObj as RenderBox;
                                 final listTop = listBox.localToGlobal(Offset.zero).dy;
+                                final listHeight = listBox.size.height;
                                 final scrollOffset = _listScrollController.hasClients ? _listScrollController.offset : 0.0;
                                 final fingerY = details.globalPosition.dy - listTop + scrollOffset;
+                                final fingerRelativeY = details.globalPosition.dy - listTop;
                                 final currentIndex = (fingerY / 96.0).floor().clamp(0, filteredProducts.length - 1);
                                 final start = _dragAnchorIndex < currentIndex ? _dragAnchorIndex : currentIndex;
                                 final end = _dragAnchorIndex < currentIndex ? currentIndex : _dragAnchorIndex;
@@ -1507,8 +1513,18 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                                     if (id != null) _selectedProductIds.add(id);
                                   }
                                 });
+                                // Auto-scroll
+                                const edgeSize = 60.0;
+                                if (fingerRelativeY < edgeSize) {
+                                  _startAutoScroll(-1);
+                                } else if (fingerRelativeY > listHeight - edgeSize) {
+                                  _startAutoScroll(1);
+                                } else {
+                                  _stopAutoScroll();
+                                }
                               },
                               onLongPressEnd: (_) {
+                                _stopAutoScroll();
                                 _isDragSelecting = false;
                                 _dragAnchorIndex = -1;
                                 if (_selectedProductIds.isEmpty && _isSelectionMode) {
@@ -2580,6 +2596,26 @@ trailing: _isSelectionMode
         );
       }
     }
+  }
+
+  void _startAutoScroll(double direction) {
+    if (_autoScrollDirection == direction && _autoScrollTimer != null) return;
+    _stopAutoScroll();
+    _autoScrollDirection = direction;
+    _autoScrollTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
+      if (!_listScrollController.hasClients) return;
+      final maxScroll = _listScrollController.position.maxScrollExtent;
+      final currentScroll = _listScrollController.offset;
+      final step = direction * 8.0;
+      final newScroll = (currentScroll + step).clamp(0.0, maxScroll);
+      _listScrollController.jumpTo(newScroll);
+    });
+  }
+
+  void _stopAutoScroll() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = null;
+    _autoScrollDirection = 0;
   }
 
   // ─── حوار تصحيح الجرد ───
