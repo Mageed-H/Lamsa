@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../database/database_helper.dart';
 // import '../services/error_logger.dart';
 import '../services/pin_hash.dart';
+import '../services/dev_lock_service.dart';
 import '../widgets/error_boundary.dart';
 import '../../features/pos/presentation/pages/pos_page.dart';
 import '../../features/products/presentation/pages/products_page.dart';
@@ -190,7 +191,19 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
-  void _openDevSettings() {
+  void _openDevSettings() async {
+    if (!mounted) return;
+
+    // فحص القفل
+    final isLocked = await DevLockService.instance.isSetup();
+    if (isLocked && mounted) {
+      final entered = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => _DevLockDialog(),
+      );
+      if (entered != true) return;
+    }
+
     if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const DevSettingsPage()),
@@ -243,6 +256,91 @@ class _MainLayoutState extends State<MainLayout> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// حوار فتح قفل صفحة المطور
+class _DevLockDialog extends StatefulWidget {
+  @override
+  State<_DevLockDialog> createState() => _DevLockDialogState();
+}
+
+class _DevLockDialogState extends State<_DevLockDialog> {
+  final _ctrl = TextEditingController();
+  final _focus = FocusNode();
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _verify() async {
+    final input = _ctrl.text.trim();
+    if (input.isEmpty) {
+      setState(() => _error = 'أدخل كلمة السر + الوقت');
+      return;
+    }
+    final ok = await DevLockService.instance.verify(input);
+    if (ok) {
+      if (mounted) Navigator.pop(context, true);
+    } else {
+      setState(() => _error = 'كلمة السر خاطئة أو انتهى الوقت');
+      _ctrl.clear();
+      _focus.requestFocus();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final timeHint = '${now.year}'
+        '${now.month.toString().padLeft(2, '0')}'
+        '${now.day.toString().padLeft(2, '0')}'
+        '${now.hour.toString().padLeft(2, '0')}'
+        '${now.minute.toString().padLeft(2, '0')}';
+
+    return AlertDialog(
+      title: const Text('🔒  قفل المطور', style: TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('كلمة السر + الوقت (24 ساعة)', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+          const SizedBox(height: 4),
+          Text('مثال: secret123@$timeHint', style: TextStyle(color: Colors.grey.shade500, fontSize: 11, fontFamily: 'monospace')),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ctrl,
+            focusNode: _focus,
+            obscureText: true,
+            onSubmitted: (_) => _verify(),
+            decoration: InputDecoration(
+              hintText: 'كلمة_السر$timeHint',
+              prefixIcon: const Icon(Icons.vpn_key, size: 18),
+              errorText: _error,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+          onPressed: _verify,
+          child: const Text('فتح'),
+        ),
+      ],
     );
   }
 }

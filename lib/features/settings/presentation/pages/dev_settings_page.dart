@@ -8,6 +8,7 @@ import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/core/services/error_logger.dart';
 import 'package:cashier_system/core/services/pin_hash.dart';
 import 'package:cashier_system/core/services/activation_service.dart';
+import 'package:cashier_system/core/services/dev_lock_service.dart';
 import 'package:cashier_system/features/z_report/presentation/pages/z_report_page.dart';
 
 /// صفحة إعدادات المطور — لا تظهر في القائمة الرئيسية
@@ -53,6 +54,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
   final _salesPinCtrl = TextEditingController();
   final _debtsPinCtrl = TextEditingController();
   final _activationCodeCtrl = TextEditingController();
+  final _devPinCtrl = TextEditingController();
   String _selectedLogLevel = 'info';
   // طابعة الفواتير
   String _receiptPrinterName = '';
@@ -96,6 +98,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
     _salesPinCtrl.dispose();
     _debtsPinCtrl.dispose();
     _activationCodeCtrl.dispose();
+    _devPinCtrl.dispose();
     super.dispose();
   }
 
@@ -884,7 +887,10 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                       style: TextStyle(color: Colors.white38, fontSize: 11),
                     ),
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 16),
+                  _buildSectionHeader('🔐  قفل صفحة المطور'),
+                  _buildDevLockSection(),
+                  const SizedBox(height: 16),
                   _buildSectionHeader('🔑  التفعيل'),
                   _buildActivationSection(),
                   const SizedBox(height: 16),
@@ -978,6 +984,136 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                 ],
               ),
             ),
+    );
+  }
+
+  // ─── قفل صفحة المطور ───
+  Widget _buildDevLockSection() {
+    return FutureBuilder<bool>(
+      future: DevLockService.instance.isSetup(),
+      builder: (ctx, snap) {
+        final isSetup = snap.data ?? false;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isSetup ? const Color(0xFF1B5E20).withOpacity(0.3) : const Color(0xFF37474F),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: isSetup ? Colors.green.shade400 : Colors.white24),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isSetup ? Icons.lock : Icons.lock_open,
+                    color: isSetup ? Colors.green : Colors.white38,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    isSetup ? 'القفل مُفعّل ✅' : 'القفل غير مُفعّل',
+                    style: TextStyle(
+                      color: isSetup ? Colors.green : Colors.white54,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildSettingField(
+              controller: _devPinCtrl,
+              label: 'كلمة سر المطور',
+              hint: 'مثال: secret123@',
+              icon: Icons.vpn_key,
+            ),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text(
+                'ℹ️ لفتح صفحة المطور اكتب: كلمة_السر + الوقت الحالي\n'
+                'مثال: secret123@202609140314\n'
+                'الوقت بنظام 24 ساعة: YYYYMMDDHHmm\n'
+                'الكود يتغير كل دقيقة ±',
+                style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.5),
+              ),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green.shade700,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    icon: const Icon(Icons.check, size: 18),
+                    label: const Text('تفعيل القفل', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () async {
+                      final secret = _devPinCtrl.text.trim();
+                      if (secret.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('أدخل كلمة السر أولاً'), backgroundColor: AppTheme.errorColor),
+                        );
+                        return;
+                      }
+                      await DevLockService.instance.setSecret(secret);
+                      if (mounted) {
+                        setState(() {});
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('تم تفعيل القفل بنجاح ✅'), backgroundColor: AppTheme.successColor),
+                        );
+                      }
+                    },
+                  ),
+                ),
+                if (isSetup) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red.shade300,
+                        side: BorderSide(color: Colors.red.shade700),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      icon: const Icon(Icons.lock_open, size: 18),
+                      label: const Text('إلغاء القفل', style: TextStyle(fontWeight: FontWeight.bold)),
+                      onPressed: () async {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('إلغاء القفل', style: TextStyle(color: AppTheme.errorColor)),
+                            content: const Text('هل أنت متأكد؟ سيصبح بإمكان الجميع الدخول لصفحة المطور.'),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor, foregroundColor: Colors.white),
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text('إلغاء القفل'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirmed == true) {
+                          await DatabaseHelper.instance.setSetting('dev_pin_hash', '');
+                          _devPinCtrl.clear();
+                          if (mounted) {
+                            setState(() {});
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('تم إلغاء القفل'), backgroundColor: AppTheme.warningColor),
+                            );
+                          }
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 
