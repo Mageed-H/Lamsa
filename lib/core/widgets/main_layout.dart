@@ -11,6 +11,7 @@ import '../../features/sales/presentation/pages/sales_page.dart';
 import '../../features/debts/presentation/pages/debts_page.dart';
 import '../../features/customers/presentation/pages/customers_page.dart';
 import '../../features/top_selling/presentation/pages/top_selling_page.dart';
+import '../../features/expenses/presentation/pages/expenses_page.dart';
 import '../../features/settings/presentation/pages/dev_settings_page.dart';
 import '../theme/app_theme.dart';
 
@@ -30,6 +31,7 @@ class _MainLayoutState extends State<MainLayout> {
   bool _debtsUnlocked = false;
   bool _topSellingUnlocked = false;
   bool _customersUnlocked = false;
+  bool _expensesUnlocked = false;
 
   // تسلسل الأحرف السري لفتح صفحة المطور: Ctrl+Alt+Shift + d e v m h
   static const _devSequence = [
@@ -49,6 +51,7 @@ class _MainLayoutState extends State<MainLayout> {
     const DebtsPage(), // شاشة الديون (Index 3)
     const CustomersPage(), // شاشة العملاء (Index 4)
     const TopSellingPage(), // شاشة الأكثر مبيعاً (Index 5)
+    const ExpensesPage(), // شاشة المصروفات (Index 6)
   ];
 
   @override
@@ -175,6 +178,13 @@ class _MainLayoutState extends State<MainLayout> {
       _topSellingUnlocked = true;
     }
 
+    // فحص PIN للمصروفات
+    if (index == 6 && !_expensesUnlocked) {
+      final ok = await _askForPin('expenses_pin', 'المصروفات');
+      if (!ok) return;
+      _expensesUnlocked = true;
+    }
+
     setState(() => _currentIndex = index);
 
     // إعلام الصفحة الأولى (الكاشير) بظهورها أو إخفائها
@@ -233,7 +243,7 @@ class _MainLayoutState extends State<MainLayout> {
     return Scaffold(
       body: Stack(
         children: _pages.asMap().entries.map((entry) {
-          final contexts = ['الكاشير', 'المنتجات', 'المبيعات', 'الديون', 'العملاء', 'الأكثر مبيعاً'];
+          final contexts = ['الكاشير', 'المنتجات', 'المبيعات', 'الديون', 'العملاء', 'الأكثر مبيعاً', 'المصروفات'];
           return Offstage(
             offstage: entry.key != _currentIndex,
             child: ErrorBoundary(
@@ -275,6 +285,10 @@ class _MainLayoutState extends State<MainLayout> {
           BottomNavigationBarItem(
             icon: Icon(Icons.trending_up),
             label: 'الأكثر مبيعاً',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.receipt_long),
+            label: 'المصروفات',
           ),
         ],
       ),

@@ -54,6 +54,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
   final _devPinCtrl = TextEditingController();
   final _topSellingPinCtrl = TextEditingController();
   final _customersPinCtrl = TextEditingController();
+  final _expensesPinCtrl = TextEditingController();
   String _selectedLogLevel = 'info';
   // طابعة الفواتير
   String _receiptPrinterName = '';
@@ -99,6 +100,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
     _devPinCtrl.dispose();
     _topSellingPinCtrl.dispose();
     _customersPinCtrl.dispose();
+    _expensesPinCtrl.dispose();
     super.dispose();
   }
 
@@ -131,6 +133,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       _debtsPinCtrl.text = settings['debts_pin'] ?? '';
       _topSellingPinCtrl.text = settings['top_selling_pin'] ?? '';
       _customersPinCtrl.text = settings['customers_pin'] ?? '';
+      _expensesPinCtrl.text = settings['expenses_pin'] ?? '';
       _selectedLogLevel = settings['log_level'] ?? 'info';
       ErrorLogger.instance.minLevel = LogLevel.fromString(_selectedLogLevel);
       // طابعة الفواتير — fallback للقيمة القديمة
@@ -266,6 +269,7 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       DatabaseHelper.instance.setSetting('debts_pin', _debtsPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_debtsPinCtrl.text.trim())),
       DatabaseHelper.instance.setSetting('top_selling_pin', _topSellingPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_topSellingPinCtrl.text.trim())),
       DatabaseHelper.instance.setSetting('customers_pin', _customersPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_customersPinCtrl.text.trim())),
+      DatabaseHelper.instance.setSetting('expenses_pin', _expensesPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_expensesPinCtrl.text.trim())),
       DatabaseHelper.instance.setSetting('log_level', _selectedLogLevel),
     ]);
 
@@ -898,10 +902,17 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                     icon: Icons.lock,
                     keyboardType: TextInputType.number,
                   ),
+                  _buildSettingField(
+                    controller: _expensesPinCtrl,
+                    label: 'رمز صفحة المصروفات',
+                    hint: 'اتركه فارغاً لإلغاء القفل',
+                    icon: Icons.lock,
+                    keyboardType: TextInputType.number,
+                  ),
                   const Padding(
                     padding: EdgeInsets.only(bottom: 12),
                     child: Text(
-                      'ℹ️ إذا حددت رمزاً، سيُطلب عند الدخول لصفحة المنتجات أو المبيعات أو الديون أو العملاء.',
+                      'ℹ️ إذا حددت رمزاً، سيُطلب عند الدخول لصفحة المنتجات أو المبيعات أو الديون أو العملاء أو المصروفات.',
                       style: TextStyle(color: Colors.white38, fontSize: 11),
                     ),
                   ),
