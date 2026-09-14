@@ -876,6 +876,8 @@ class _PosPageState extends State<PosPage> {
     String customerPhone = '';
     bool applyCustomerDiscount = false;
     int customerDiscountPercent = 0;
+    bool usePointsDiscount = false;
+    int pointsDiscountAmount = 0;
     final customerCtrl = TextEditingController();
     List<Map<String, dynamic>> allCustomerData = [];
 
@@ -884,7 +886,7 @@ class _PosPageState extends State<PosPage> {
     final debtNames = await DatabaseHelper.instance.getDebtCustomerNames();
     final debtPhones = await DatabaseHelper.instance.getDebtCustomerPhones();
     for (final c in dbCustomers) {
-      allCustomerData.add({'name': c['name'] as String, 'phone': c['phone'] as String? ?? ''});
+      allCustomerData.add({'name': c['name'] as String, 'phone': c['phone'] as String? ?? '', 'loyalty_points': c['loyalty_points'] as int? ?? 0});
     }
     for (int i = 0; i < debtNames.length; i++) {
       if (!allCustomerData.any((c) => c['name'] == debtNames[i])) {
@@ -1118,6 +1120,8 @@ class _PosPageState extends State<PosPage> {
                           customerName = val;
                           customerPhone = '';
                           applyCustomerDiscount = false;
+                          usePointsDiscount = false;
+                          pointsDiscountAmount = 0;
                           discountVal = _discountValue;
                           total = subtotal - discountVal;
                           amountController.text = '$total';
@@ -1213,6 +1217,65 @@ class _PosPageState extends State<PosPage> {
                         );
                       },
                     ),
+                  if (customerName.isNotEmpty && allCustomerData.any((c) => c['name'] == customerName))
+                    Builder(
+                      builder: (ctx) {
+                        final custData = allCustomerData.firstWhere((c) => c['name'] == customerName, orElse: () => {});
+                        final pts = custData['loyalty_points'] as int? ?? 0;
+                        if (pts <= 0) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: GestureDetector(
+                            onTap: () {
+                              setDialogState(() {
+                                usePointsDiscount = !usePointsDiscount;
+                                if (usePointsDiscount) {
+                                  final settings = <String, dynamic>{};
+                                  final dpp = 100;
+                                  pointsDiscountAmount = pts * dpp;
+                                  discountVal = _discountValue + pointsDiscountAmount;
+                                  if (applyCustomerDiscount) {
+                                    discountVal += subtotal * customerDiscountPercent ~/ 100;
+                                  }
+                                } else {
+                                  pointsDiscountAmount = 0;
+                                  discountVal = _discountValue;
+                                  if (applyCustomerDiscount) {
+                                    discountVal += subtotal * customerDiscountPercent ~/ 100;
+                                  }
+                                }
+                                total = subtotal - discountVal;
+                                amountController.text = '$total';
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: usePointsDiscount ? AppTheme.warningColor : AppTheme.warningColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppTheme.warningColor),
+                              ),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                Icon(
+                                  usePointsDiscount ? Icons.check_circle : Icons.stars,
+                                  size: 14,
+                                  color: usePointsDiscount ? Colors.white : AppTheme.warningColor,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  usePointsDiscount ? 'صرف $pts نقطة ✓' : '💰 $pts نقطة متاحة',
+                                  style: TextStyle(
+                                    color: usePointsDiscount ? Colors.white : AppTheme.warningColor,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ]),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                 ],
               ],
             ),
@@ -1266,6 +1329,16 @@ class _PosPageState extends State<PosPage> {
       // حفظ العميل الجديد إذا لم يكن موجوداً
       if (customerName.isNotEmpty && saleId > 0 && !allCustomerData.any((c) => c['name'] == customerName)) {
         await DatabaseHelper.instance.insertCustomer(customerName, phone: customerPhone);
+      }
+
+      // صرف نقاط الولاء
+      if (usePointsDiscount && customerName.isNotEmpty && saleId > 0 && pointsDiscountAmount > 0) {
+        final settings = await DatabaseHelper.instance.getLoyaltySettings();
+        final dpp = settings['discount_per_point'] as int;
+        final pointsToSpend = pointsDiscountAmount ~/ dpp;
+        if (pointsToSpend > 0) {
+          await DatabaseHelper.instance.spendPointsForDiscount(customerName, pointsToSpend);
+        }
       }
 
       // كسب نقاط الولاء
