@@ -54,6 +54,13 @@ class DevLockService {
     return hash.isNotEmpty;
   }
 
+  /// التحقق من كلمة السر الحالية (بدون فحص الوقت)
+  Future<bool> verifyCurrentSecret(String secret) async {
+    final storedHash = await DatabaseHelper.instance.getSetting('dev_pin_hash');
+    if (storedHash.isEmpty) return false;
+    return _hash(secret) == storedHash;
+  }
+
   String _hash(String input) {
     final bytes = utf8.encode(input);
     return sha256.convert(bytes).toString();

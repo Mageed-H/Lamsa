@@ -27,6 +27,7 @@ class _MainLayoutState extends State<MainLayout> {
   bool _productsUnlocked = false;
   bool _salesUnlocked = false;
   bool _debtsUnlocked = false;
+  bool _topSellingUnlocked = false;
 
   // تسلسل الأحرف السري لفتح صفحة المطور: Ctrl+Alt+Shift + d e v m h
   static const _devSequence = [
@@ -155,6 +156,13 @@ class _MainLayoutState extends State<MainLayout> {
       final ok = await _askForPin('debts_pin', 'الديون');
       if (!ok) return;
       _debtsUnlocked = true;
+    }
+
+    // فحص PIN للأكثر مبيعاً
+    if (index == 4 && !_topSellingUnlocked) {
+      final ok = await _askForPin('top_selling_pin', 'الأكثر مبيعاً');
+      if (!ok) return;
+      _topSellingUnlocked = true;
     }
 
     setState(() => _currentIndex = index);
