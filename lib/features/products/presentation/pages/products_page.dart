@@ -1442,7 +1442,54 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                             style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
                           ),
                         )
-                      : ListView.builder(
+                      : Listener(
+                      onPointerMove: (event) {
+                        if (!_isDragSelecting || _dragAnchorIndex < 0) return;
+                        final listObj = _listKey.currentContext?.findRenderObject();
+                        if (listObj == null || !listObj.attached) return;
+                        final listBox = listObj as RenderBox;
+                        final listTop = listBox.localToGlobal(Offset.zero).dy;
+                        final listHeight = listBox.size.height;
+                        final scrollOffset = _listScrollController.hasClients ? _listScrollController.offset : 0.0;
+                        final fingerY = event.position.dy - listTop + scrollOffset;
+                        final fingerRelativeY = event.position.dy - listTop;
+                        final currentIndex = (fingerY / 96.0).floor().clamp(0, filteredProducts.length - 1);
+                        final start = _dragAnchorIndex < currentIndex ? _dragAnchorIndex : currentIndex;
+                        final end = _dragAnchorIndex < currentIndex ? currentIndex : _dragAnchorIndex;
+                        setState(() {
+                          for (var i = start; i <= end; i++) {
+                            final id = filteredProducts[i].id;
+                            if (id != null) _selectedProductIds.add(id);
+                          }
+                        });
+                        const edgeSize = 60.0;
+                        if (fingerRelativeY < edgeSize && fingerRelativeY > -100) {
+                          _startAutoScroll(-1);
+                        } else if (fingerRelativeY > listHeight - edgeSize && fingerRelativeY < listHeight + 100) {
+                          _startAutoScroll(1);
+                        } else {
+                          _stopAutoScroll();
+                        }
+                      },
+                      onPointerUp: (_) {
+                        if (_isDragSelecting) {
+                          _stopAutoScroll();
+                          _isDragSelecting = false;
+                          _dragAnchorIndex = -1;
+                          if (_selectedProductIds.isEmpty && _isSelectionMode) {
+                            setState(() {
+                              _isSelectionMode = false;
+                              _selectionAnimController.reverse();
+                            });
+                          }
+                        }
+                      },
+                      onPointerCancel: (_) {
+                        _stopAutoScroll();
+                        _isDragSelecting = false;
+                        _dragAnchorIndex = -1;
+                      },
+                      child: ListView.builder(
                       key: _listKey,
                       controller: _listScrollController,
                       itemExtent: 96.0,
@@ -1493,46 +1540,6 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                                   }
                                   _selectedProductIds.add(pid);
                                 });
-                              },
-                              onLongPressMoveUpdate: (details) {
-                                if (!_isDragSelecting || _dragAnchorIndex < 0) return;
-                                final listObj = _listKey.currentContext?.findRenderObject();
-                                if (listObj == null || !listObj.attached) return;
-                                final listBox = listObj as RenderBox;
-                                final listTop = listBox.localToGlobal(Offset.zero).dy;
-                                final listHeight = listBox.size.height;
-                                final scrollOffset = _listScrollController.hasClients ? _listScrollController.offset : 0.0;
-                                final fingerY = details.globalPosition.dy - listTop + scrollOffset;
-                                final fingerRelativeY = details.globalPosition.dy - listTop;
-                                final currentIndex = (fingerY / 96.0).floor().clamp(0, filteredProducts.length - 1);
-                                final start = _dragAnchorIndex < currentIndex ? _dragAnchorIndex : currentIndex;
-                                final end = _dragAnchorIndex < currentIndex ? currentIndex : _dragAnchorIndex;
-                                setState(() {
-                                  for (var i = start; i <= end; i++) {
-                                    final id = filteredProducts[i].id;
-                                    if (id != null) _selectedProductIds.add(id);
-                                  }
-                                });
-                                // Auto-scroll
-                                const edgeSize = 60.0;
-                                if (fingerRelativeY < edgeSize) {
-                                  _startAutoScroll(-1);
-                                } else if (fingerRelativeY > listHeight - edgeSize) {
-                                  _startAutoScroll(1);
-                                } else {
-                                  _stopAutoScroll();
-                                }
-                              },
-                              onLongPressEnd: (_) {
-                                _stopAutoScroll();
-                                _isDragSelecting = false;
-                                _dragAnchorIndex = -1;
-                                if (_selectedProductIds.isEmpty && _isSelectionMode) {
-                                  setState(() {
-                                    _isSelectionMode = false;
-                                    _selectionAnimController.reverse();
-                                  });
-                                }
                               },
                               child: ListTile(
                               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
@@ -1659,9 +1666,10 @@ trailing: _isSelectionMode
                            ), // ListTile
                            ), // GestureDetector
                            ), // Material
-                         );
+                          );
                       },
                      ),
+                     ), // Listener
         ),
         // ─── شريط التحديد السفلي (Animated) ───
         AnimatedBuilder(
