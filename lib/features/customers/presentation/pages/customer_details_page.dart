@@ -37,6 +37,90 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
     }
   }
 
+  Future<void> _showSaleDetails(int saleId, int totalAmount, int discountAmount, String time) async {
+    final items = await DatabaseHelper.instance.getSaleItems(saleId);
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, MediaQuery.of(ctx).viewInsets.bottom + 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('فاتورة #R${saleId.toString().padLeft(6, '0')}',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+                Text(time, style: const TextStyle(color: AppTheme.textSecondary)),
+              ],
+            ),
+            const Divider(),
+            // بنود الفاتورة
+            ...items.map((item) {
+              final name = item['product_name'] as String? ?? '';
+              final qty = item['quantity'] as int? ?? 0;
+              final unitPrice = item['unit_price'] as int? ?? 0;
+              final purchasePrice = item['purchase_price'] as int? ?? 0;
+              final itemTotal = unitPrice * qty;
+              final profit = (unitPrice - purchasePrice) * qty;
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          Text('السعر: $unitPrice د  |  الكمية: $qty', style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text('$itemTotal د', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryColor)),
+                        Text('ربح: $profit', style: TextStyle(fontSize: 11, color: profit > 0 ? AppTheme.successColor : AppTheme.textSecondary)),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
+            const Divider(),
+            // الخصم
+            if (discountAmount > 0)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('الخصم', style: TextStyle(fontSize: 14, color: AppTheme.errorColor, fontWeight: FontWeight.bold)),
+                    Text('- $discountAmount دينار', style: const TextStyle(fontSize: 14, color: AppTheme.errorColor, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            // الإجمالي
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('الإجمالي', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text('$totalAmount دينار', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -199,6 +283,7 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
               final id = sale['id'] as int;
               final amount = sale['total_amount'] as int? ?? 0;
               final itemsCount = sale['items_count'] as int? ?? 0;
+              final discountAmount = sale['discount_amount'] as int? ?? 0;
               final receipt = sale['receipt_number'] as String? ?? 'R${id.toString().padLeft(6, '0')}';
               final createdAt = (sale['created_at'] as String? ?? '').replaceAll('T', '  ');
               final timeStr = createdAt.length >= 16 ? createdAt.substring(0, 16) : createdAt;
@@ -212,6 +297,7 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
                 title: Text('$amount دينار', style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text('$receipt  |  $timeStr', style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
                 trailing: const Icon(Icons.chevron_left, color: AppTheme.textSecondary),
+                onTap: () => _showSaleDetails(id, amount, discountAmount, timeStr),
               );
             }),
           ],

@@ -866,13 +866,22 @@ class _PosPageState extends State<PosPage> {
     bool shouldPrint = true;
     bool isCustomer = false;
     String customerName = '';
+    String customerPhone = '';
     final customerCtrl = TextEditingController();
-    List<String> customerSuggestions = [];
+    List<Map<String, dynamic>> allCustomerData = [];
 
-    // تحميل أسماء العملاء
-    final allCustomers = await DatabaseHelper.instance.getCustomerNames();
-    final allDebtorNames = await DatabaseHelper.instance.getDebtCustomerNames();
-    customerSuggestions = {...allCustomers, ...allDebtorNames}.toList()..sort();
+    // تحميل أسماء وأرقام العملاء
+    final dbCustomers = await DatabaseHelper.instance.getAllCustomers();
+    final debtNames = await DatabaseHelper.instance.getDebtCustomerNames();
+    final debtPhones = await DatabaseHelper.instance.getDebtCustomerPhones();
+    for (final c in dbCustomers) {
+      allCustomerData.add({'name': c['name'] as String, 'phone': c['phone'] as String? ?? ''});
+    }
+    for (int i = 0; i < debtNames.length; i++) {
+      if (!allCustomerData.any((c) => c['name'] == debtNames[i])) {
+        allCustomerData.add({'name': debtNames[i], 'phone': i < debtPhones.length ? debtPhones[i] : ''});
+      }
+    }
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1058,14 +1067,21 @@ class _PosPageState extends State<PosPage> {
                 ),
                 if (isCustomer) ...[
                   const SizedBox(height: 8),
-                  Autocomplete<String>(
+                  Autocomplete<Map<String, dynamic>>(
                     optionsBuilder: (TextEditingValue textEditingValue) {
-                      if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
-                      return customerSuggestions.where((s) => s.contains(textEditingValue.text));
+                      if (textEditingValue.text.isEmpty) return const Iterable<Map<String, dynamic>>.empty();
+                      final q = textEditingValue.text.toLowerCase();
+                      return allCustomerData.where((c) {
+                        final name = (c['name'] as String).toLowerCase();
+                        final phone = (c['phone'] as String).toLowerCase();
+                        return name.contains(q) || phone.contains(q);
+                      });
                     },
-                    onSelected: (val) {
-                      customerName = val;
-                      customerCtrl.text = val;
+                    displayStringForOption: (c) => '${c['name']}${(c['phone'] as String).isNotEmpty ? ' (${c['phone']})' : ''}',
+                    onSelected: (c) {
+                      customerName = c['name'] as String;
+                      customerPhone = c['phone'] as String? ?? '';
+                      customerCtrl.text = customerName;
                       setDialogState(() {});
                     },
                     fieldViewBuilder: (context, fieldController, focusNode, onSubmitted) {
@@ -1083,6 +1099,7 @@ class _PosPageState extends State<PosPage> {
                                   onPressed: () {
                                     fieldController.clear();
                                     customerName = '';
+                                    customerPhone = '';
                                     setDialogState(() {});
                                   },
                                 )
@@ -1090,12 +1107,42 @@ class _PosPageState extends State<PosPage> {
                         ),
                         onChanged: (val) {
                           customerName = val;
+                          customerPhone = '';
                           setDialogState(() {});
                         },
                       );
                     },
+                    optionsViewBuilder: (context, onSelected, options) {
+                      return Align(
+                        alignment: Alignment.topRight,
+                        child: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 200),
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              shrinkWrap: true,
+                              itemCount: options.length,
+                              itemBuilder: (ctx, i) {
+                                final c = options.elementAt(i);
+                                final name = c['name'] as String;
+                                final phone = c['phone'] as String;
+                                return ListTile(
+                                  dense: true,
+                                  leading: const Icon(Icons.person, size: 18),
+                                  title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                  subtitle: phone.isNotEmpty ? Text(phone, style: const TextStyle(fontSize: 12)) : null,
+                                  onTap: () => onSelected(c),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  if (customerName.isNotEmpty && !customerSuggestions.contains(customerName))
+                  if (customerName.isNotEmpty && !allCustomerData.any((c) => c['name'] == customerName))
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
@@ -1152,6 +1199,11 @@ class _PosPageState extends State<PosPage> {
         discountValue: discountVal,
         customerName: customerName,
       );
+
+      // حفظ العميل الجديد إذا لم يكن موجوداً
+      if (customerName.isNotEmpty && saleId > 0 && !allCustomerData.any((c) => c['name'] == customerName)) {
+        await DatabaseHelper.instance.insertCustomer(customerName, phone: customerPhone);
+      }
 
       if (saleId > 0 && mounted) {
         _lastPrintCart = cartSnapshot;

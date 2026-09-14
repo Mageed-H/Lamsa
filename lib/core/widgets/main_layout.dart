@@ -9,6 +9,7 @@ import '../../features/pos/presentation/pages/pos_page.dart';
 import '../../features/products/presentation/pages/products_page.dart';
 import '../../features/sales/presentation/pages/sales_page.dart';
 import '../../features/debts/presentation/pages/debts_page.dart';
+import '../../features/customers/presentation/pages/customers_page.dart';
 import '../../features/top_selling/presentation/pages/top_selling_page.dart';
 import '../../features/settings/presentation/pages/dev_settings_page.dart';
 import '../theme/app_theme.dart';
@@ -28,6 +29,7 @@ class _MainLayoutState extends State<MainLayout> {
   bool _salesUnlocked = false;
   bool _debtsUnlocked = false;
   bool _topSellingUnlocked = false;
+  bool _customersUnlocked = false;
 
   // تسلسل الأحرف السري لفتح صفحة المطور: Ctrl+Alt+Shift + d e v m h
   static const _devSequence = [
@@ -45,7 +47,8 @@ class _MainLayoutState extends State<MainLayout> {
     const ProductsPage(), // شاشة إدارة المنتجات (Index 1)
     const SalesPage(), // شاشة المبيعات (Index 2)
     const DebtsPage(), // شاشة الديون (Index 3)
-    const TopSellingPage(), // شاشة الأكثر مبيعاً (Index 4)
+    const CustomersPage(), // شاشة العملاء (Index 4)
+    const TopSellingPage(), // شاشة الأكثر مبيعاً (Index 5)
   ];
 
   @override
@@ -158,8 +161,15 @@ class _MainLayoutState extends State<MainLayout> {
       _debtsUnlocked = true;
     }
 
+    // فحص PIN للعملاء
+    if (index == 4 && !_customersUnlocked) {
+      final ok = await _askForPin('customers_pin', 'العملاء');
+      if (!ok) return;
+      _customersUnlocked = true;
+    }
+
     // فحص PIN للأكثر مبيعاً
-    if (index == 4 && !_topSellingUnlocked) {
+    if (index == 5 && !_topSellingUnlocked) {
       final ok = await _askForPin('top_selling_pin', 'الأكثر مبيعاً');
       if (!ok) return;
       _topSellingUnlocked = true;
@@ -223,7 +233,7 @@ class _MainLayoutState extends State<MainLayout> {
     return Scaffold(
       body: Stack(
         children: _pages.asMap().entries.map((entry) {
-          final contexts = ['الكاشير', 'المنتجات', 'المبيعات', 'الديون', 'الأكثر مبيعاً'];
+          final contexts = ['الكاشير', 'المنتجات', 'المبيعات', 'الديون', 'العملاء', 'الأكثر مبيعاً'];
           return Offstage(
             offstage: entry.key != _currentIndex,
             child: ErrorBoundary(
@@ -257,6 +267,10 @@ class _MainLayoutState extends State<MainLayout> {
           BottomNavigationBarItem(
             icon: Icon(Icons.account_balance_wallet),
             label: 'الديون',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.people),
+            label: 'العملاء',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.trending_up),

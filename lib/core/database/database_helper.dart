@@ -2074,6 +2074,16 @@ class DatabaseHelper {
     }
   }
 
+  Future<List<String>> getDebtCustomerPhones() async {
+    try {
+      final db = await instance.database;
+      final rows = await db.rawQuery('SELECT DISTINCT phone FROM debts WHERE customer_name IS NOT NULL AND customer_name != \'\' ORDER BY customer_name');
+      return rows.map((r) => r['phone'] as String? ?? '').toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
   /// جلب الديون غير المسددة فقط
   Future<List<Map<String, dynamic>>> getUnpaidDebts() async {
     try {
