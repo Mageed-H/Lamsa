@@ -1897,19 +1897,21 @@ class _PosPageState extends State<PosPage> {
 
   // ─── تحميل جميع المنتجات ───
   Future<void> _loadAllProducts() async {
-    final products = await DatabaseHelper.instance.getAllProducts();
-    final thresholdStr = await DatabaseHelper.instance.getSetting(
-      'low_stock_threshold',
-      defaultValue: '5',
-    );
-    final threshold = int.tryParse(thresholdStr) ?? 5;
-    final lowStock = products.where((p) => p.stock <= threshold && p.stock >= 0).toList();
-    if (mounted) {
-      setState(() {
-        _allProducts = products;
-        _lowStockProducts = lowStock;
-      });
-    }
+    try {
+      final products = await DatabaseHelper.instance.getAllProducts();
+      final thresholdStr = await DatabaseHelper.instance.getSetting(
+        'low_stock_threshold',
+        defaultValue: '5',
+      );
+      final threshold = int.tryParse(thresholdStr) ?? 5;
+      final lowStock = products.where((p) => p.stock <= threshold && p.stock >= 0).toList();
+      if (mounted) {
+        setState(() {
+          _allProducts = products;
+          _lowStockProducts = lowStock;
+        });
+      }
+    } catch (_) {}
   }
 
   // ─── حوار الخصم ───

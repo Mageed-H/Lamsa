@@ -183,16 +183,20 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
   Future<void> _loadAllProducts() async {
     if (!mounted) return;
     setState(() => _isLoadingProducts = true);
-    final products = await DatabaseHelper.instance.getAllProducts();
-    final barcodesMap = await DatabaseHelper.instance.getAllBarcodesByProduct();
-    final salesStats = await DatabaseHelper.instance.getProductSalesStats();
-    if (mounted) {
-      setState(() {
-        _allProducts = products;
-        _secondaryBarcodes = barcodesMap;
-        _productSalesStats = salesStats;
-        _isLoadingProducts = false;
-      });
+    try {
+      final products = await DatabaseHelper.instance.getAllProducts();
+      final barcodesMap = await DatabaseHelper.instance.getAllBarcodesByProduct();
+      final salesStats = await DatabaseHelper.instance.getProductSalesStats();
+      if (mounted) {
+        setState(() {
+          _allProducts = products;
+          _secondaryBarcodes = barcodesMap;
+          _productSalesStats = salesStats;
+          _isLoadingProducts = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingProducts = false);
     }
   }
 
@@ -321,7 +325,7 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
           _isCustomBarcode = false;
           _extraBarcodes.clear();
         });
-        _loadAllProducts();
+        await _loadAllProducts();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('حدث خطأ أثناء الحفظ!'), backgroundColor: AppTheme.errorColor));
       }
