@@ -382,7 +382,17 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
                 }),
               ],
               const SizedBox(height: 20),
-              if (!isPaid)
+              if (!isPaid) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                    icon: const Icon(Icons.add_circle_outline),
+                    label: const Text('إضافة دين', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () { Navigator.pop(ctx); _showAddMoreDebtDialog(debt); },
+                  ),
+                ),
+                const SizedBox(height: 8),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
@@ -392,6 +402,7 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
                     onPressed: () { Navigator.pop(ctx); _showPayDebtDialog(debt); },
                   ),
                 ),
+              ],
             ],
           ),
         ),
@@ -480,6 +491,117 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
             backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
           ),
         );
+      }
+    }
+  }
+
+  Future<void> _showAddMoreDebtDialog(Map<String, dynamic> debt) async {
+    final debtId = debt['id'] as int;
+    final supplierName = debt['supplier_name'] as String;
+    final phone = debt['phone'] as String? ?? '';
+    final note = debt['note'] as String? ?? '';
+    final currentTotal = debt['amount'] as int;
+
+    final amountCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final addAmount = int.tryParse(amountCtrl.text) ?? 0;
+          final newTotal = currentTotal + addAmount;
+
+          return AlertDialog(
+            title: Text('إضافة دين — $supplierName', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: AppTheme.neutralLightColor, borderRadius: BorderRadius.circular(8)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        Column(children: [
+                          Text('$currentTotal', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+                          const Text('الدين الحالي', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                        ]),
+                        if (addAmount > 0) ...[
+                          const Icon(Icons.add, color: AppTheme.errorColor, size: 20),
+                          Column(children: [
+                            Text('$addAmount', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.errorColor)),
+                            const Text('يُضاف', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                          ]),
+                          const Icon(Icons.arrow_forward, color: AppTheme.textSecondary, size: 20),
+                          Column(children: [
+                            Text('$newTotal', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.errorColor)),
+                            const Text('الجديد', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                          ]),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: amountCtrl,
+                    keyboardType: TextInputType.number,
+                    autofocus: true,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    decoration: const InputDecoration(
+                      labelText: 'المبلغ المضاف',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.add_circle_outline),
+                    ),
+                    onChanged: (_) => setDialogState(() {}),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: addAmount > 0 ? AppTheme.errorColor : AppTheme.neutralColor,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: addAmount > 0 ? () => Navigator.pop(ctx, true) : null,
+                child: const Text('إضافة'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed == true) {
+      final addAmount = int.tryParse(amountCtrl.text.trim()) ?? 0;
+      final newTotal = currentTotal + addAmount;
+      final success = await DatabaseHelper.instance.updateShopDebt(
+        debtId,
+        amount: newTotal,
+        supplierName: supplierName,
+        phone: phone,
+        note: note,
+      );
+      if (mounted) {
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('تم إضافة $addAmount دينار | الدين الجديد: $newTotal دينار'),
+              backgroundColor: AppTheme.errorColor,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('فشل إضافة الدين — حاول مجدداً'),
+              backgroundColor: AppTheme.errorColor,
+            ),
+          );
+        }
       }
     }
   }
