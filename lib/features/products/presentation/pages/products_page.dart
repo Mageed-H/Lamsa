@@ -96,9 +96,6 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
 
   // فلاتر المخزون
   String _filterStock = ''; // '', 'zero', 'low', 'medium', 'high'
-  // فلترة السعر
-  int? _filterPriceMin;
-  int? _filterPriceMax;
   // فلترة الربح
   int? _filterProfitMin;
   int? _filterProfitMax;
@@ -1266,14 +1263,7 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
         }
       }).toList();
     }
-    // فلترة السعر
-    if (_filterPriceMin != null) {
-      filteredProducts = filteredProducts.where((p) => p.price >= _filterPriceMin!).toList();
-    }
-    if (_filterPriceMax != null) {
-      filteredProducts = filteredProducts.where((p) => p.price <= _filterPriceMax!).toList();
-    }
-    // فلترة الربح
+
     if (_filterProfitMin != null) {
       filteredProducts = filteredProducts.where((p) => (p.price - p.purchasePrice) >= _filterProfitMin!).toList();
     }
@@ -2029,25 +2019,25 @@ trailing: _isSelectionMode
             ],
           ),
           const SizedBox(height: 8),
-          // فلترة السعر والربح
-          Row(
-            children: [
-              const Text('السعر: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-              const SizedBox(width: 4),
-              _buildPriceFilterChip('أقل من 10', _filterPriceMax == 10, () {
-                setState(() { _filterPriceMin = null; _filterPriceMax = _filterPriceMax == 10 ? null : 10; });
-              }),
-              _buildPriceFilterChip('10-50', _filterPriceMin == 10 && _filterPriceMax == 50, () {
-                setState(() { _filterPriceMin = 10; _filterPriceMax = 50; });
-              }),
-              _buildPriceFilterChip('50-100', _filterPriceMin == 50 && _filterPriceMax == 100, () {
-                setState(() { _filterPriceMin = 50; _filterPriceMax = 100; });
-              }),
-              _buildPriceFilterChip('أكثر من 100', _filterPriceMin == 100, () {
-                setState(() { _filterPriceMin = _filterPriceMin == 100 ? null : 100; _filterPriceMax = null; });
-              }),
-            ],
-          ),
+          // فلترة القسم
+          if (_categories.isNotEmpty)
+            Row(
+              children: [
+                const Text('القسم: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _buildFilterChip('الكل', _filterCategory == '', () => setState(() => _filterCategory = '')),
+                        ..._categories.map((c) => _buildFilterChip(c, _filterCategory == c, () => setState(() => _filterCategory = _filterCategory == c ? '' : c))),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           const SizedBox(height: 8),
           // فلترة اللون والقياس
           Row(
@@ -2139,37 +2129,8 @@ trailing: _isSelectionMode
     );
   }
 
-  Widget _buildPriceFilterChip(String label, bool isSelected, VoidCallback onTap) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 4),
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: isSelected ? AppTheme.successColor : AppTheme.surfaceColor,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isSelected ? AppTheme.successColor : Colors.grey.withOpacity(0.3),
-            ),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? Colors.white : AppTheme.textPrimary,
-              fontSize: 11,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   bool _hasActiveFilters() {
     return _filterStock.isNotEmpty ||
-        _filterPriceMin != null || _filterPriceMax != null ||
         _filterProfitMin != null || _filterProfitMax != null ||
         _filterColor.isNotEmpty || _filterSize.isNotEmpty ||
         _filterCategory.isNotEmpty ||
@@ -2179,8 +2140,6 @@ trailing: _isSelectionMode
   void _clearAllFilters() {
     setState(() {
       _filterStock = '';
-      _filterPriceMin = null;
-      _filterPriceMax = null;
       _filterProfitMin = null;
       _filterProfitMax = null;
       _filterColor = '';
