@@ -2296,12 +2296,21 @@ trailing: _isSelectionMode
   Future<void> _applyBulkOperation() async {
     if (_selectedProductIds.isEmpty) return;
 
-    // العمليات 0,1,2 تحتاج كمية
-    if (_bulkOperationType <= 2) {
+    // العمليات 0,1 تحتاج كمية أكبر من صفر، operation 2 (تعيين) يسمح بـ 0
+    if (_bulkOperationType <= 1) {
       final qty = int.tryParse(_bulkQtyController.text);
       if (qty == null || qty <= 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('أدخل كمية صحيحة أكبر من صفر'), backgroundColor: AppTheme.errorColor),
+        );
+        return;
+      }
+    }
+    if (_bulkOperationType == 2) {
+      final qty = int.tryParse(_bulkQtyController.text);
+      if (qty == null || qty < 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('أدخل رقم صحيح (0 أو أكثر)'), backgroundColor: AppTheme.errorColor),
         );
         return;
       }
