@@ -279,6 +279,7 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
     final isPaid = remaining <= 0;
 
     final payments = await DatabaseHelper.instance.getShopDebtPayments(debtId);
+    final additions = await DatabaseHelper.instance.getShopDebtAdditions(debtId);
 
     if (!mounted) return;
     showModalBottomSheet(
@@ -376,6 +377,39 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
                           Text('$payAmount دينار', style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.successColor)),
                         ]),
                         Text(payDate, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+              if (additions.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Row(children: [
+                  const Icon(Icons.add_circle, size: 18, color: AppTheme.errorColor),
+                  const SizedBox(width: 8),
+                  Text('سجل الإضافات (${additions.length})', style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.errorColor, fontSize: 14)),
+                ]),
+                const SizedBox(height: 8),
+                ...additions.map((a) {
+                  final addAmount = a['amount'] as int;
+                  final addDate = _formatDate(a['created_at'] as String?);
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.errorColor.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.errorColor.withValues(alpha: 0.2)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(children: [
+                          const Icon(Icons.add_circle, size: 16, color: AppTheme.errorColor),
+                          const SizedBox(width: 8),
+                          Text('$addAmount دينار', style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.errorColor)),
+                        ]),
+                        Text(addDate, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
                       ],
                     ),
                   );
@@ -578,16 +612,10 @@ class _ShopDebtsPageState extends State<ShopDebtsPage> {
 
     if (confirmed == true) {
       final addAmount = int.tryParse(amountCtrl.text.trim()) ?? 0;
-      final newTotal = currentTotal + addAmount;
-      final success = await DatabaseHelper.instance.updateShopDebt(
-        debtId,
-        amount: newTotal,
-        supplierName: supplierName,
-        phone: phone,
-        note: note,
-      );
+      final success = await DatabaseHelper.instance.addShopDebtAmount(debtId, addAmount);
       if (mounted) {
         if (success) {
+          final newTotal = currentTotal + addAmount;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('تم إضافة $addAmount دينار | الدين الجديد: $newTotal دينار'),

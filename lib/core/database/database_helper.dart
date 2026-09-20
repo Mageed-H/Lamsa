@@ -79,7 +79,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 18, // الإصدار 18: نظام الولاء والهدايا
+      version: 19, // الإصدار 19: سجل إضافات ديون المحل
       onConfigure: _onConfigure, // مفتاح التشفير + العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -449,6 +449,10 @@ class DatabaseHelper {
     await _createV13Tables(db);
     await _createV14Tables(db);
     await _createV15Tables(db);
+    await _createV16Tables(db);
+    await _createV17Tables(db);
+    await _createV18Tables(db);
+    await _createV19Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -511,6 +515,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 18) {
       await _createV18Tables(db);
+    }
+    if (oldVersion < 19) {
+      await _createV19Tables(db);
     }
   }
 
@@ -1846,6 +1853,62 @@ class DatabaseHelper {
       )
     ''');
     await db.execute('INSERT OR IGNORE INTO loyalty_settings (id) VALUES (1)');
+  }
+
+  // ==========================================================
+  // الإصدار 19: سجل إضافات ديون المحل
+  // ==========================================================
+  Future _createV19Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS shop_debt_additions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        debt_id INTEGER NOT NULL,
+        amount INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (debt_id) REFERENCES shop_debts (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sda_debt ON shop_debt_additions (debt_id);');
+  }
+
+  /// تسجيل إضافة دين على المحل
+  Future<bool> addShopDebtAmount(int debtId, int amount) async {
+    if (amount <= 0) return false;
+    try {
+      final db = await instance.database;
+      return await db.transaction((txn) async {
+        // تحديث المبلغ الكلي في الدين
+        final rows = await txn.query('shop_debts', where: 'id = ?', whereArgs: [debtId]);
+        if (rows.isEmpty) return false;
+        final currentAmount = rows.first['amount'] as int;
+        await txn.update(
+          'shop_debts',
+          {'amount': currentAmount + amount, 'updated_at': DateTime.now().toIso8601String()},
+          where: 'id = ?',
+          whereArgs: [debtId],
+        );
+        // تسجيل الإضافة
+        await txn.insert('shop_debt_additions', {
+          'debt_id': debtId,
+          'amount': amount,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+        return true;
+      });
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// جلب إضافات الدين لדיون معين
+  Future<List<Map<String, dynamic>>> getShopDebtAdditions(int debtId) async {
+    final db = await instance.database;
+    return await db.query(
+      'shop_debt_additions',
+      where: 'debt_id = ?',
+      whereArgs: [debtId],
+      orderBy: 'created_at DESC',
+    );
   }
 
   /// تصحيح جرد منتج يدوياً مع تسجيل السبب
