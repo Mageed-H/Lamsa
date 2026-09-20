@@ -2500,17 +2500,27 @@ class DatabaseHelper {
     try {
       final db = await instance.database;
       final now = DateTime.now().toIso8601String();
-      final id = await db.insert('shop_debts', {
-        'supplier_name': supplierName.trim(),
-        'phone': phone?.trim(),
-        'amount': amount,
-        'paid': 0,
-        'note': note?.trim(),
-        'created_at': now,
-        'updated_at': now,
+      return await db.transaction((txn) async {
+        final id = await txn.insert('shop_debts', {
+          'supplier_name': supplierName.trim(),
+          'phone': phone?.trim(),
+          'amount': amount,
+          'paid': 0,
+          'note': note?.trim(),
+          'created_at': now,
+          'updated_at': now,
+        });
+        if (id > 0) {
+          await txn.insert('shop_debt_additions', {
+            'debt_id': id,
+            'amount': amount,
+            'created_at': now,
+          });
+          debtsRevision.value++;
+          _notifyAll();
+        }
+        return id;
       });
-      if (id > 0) { debtsRevision.value++; _notifyAll(); }
-      return id;
     } catch (e) {
       print('Error inserting shop debt: $e');
       return -1;
