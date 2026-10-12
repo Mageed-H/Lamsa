@@ -465,6 +465,20 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
     String? filterCategory;
     bool includeZero = false;
     final notesCtrl = TextEditingController();
+    // أعمدة التقرير
+    final selectedCols = <String>{'name', 'category', 'stock'};
+    const allCols = [
+      ('name', 'المنتج'),
+      ('category', 'القسم'),
+      ('color', 'اللون'),
+      ('size', 'القياس'),
+      ('stock', 'المخزون'),
+      ('barcode', 'الباركود'),
+      ('purchase_price', 'سعر الشراء'),
+      ('price', 'سعر البيع'),
+    ];
+    // ترتيب التقرير
+    String reportSort = 'categoryStock'; // categoryStock, lowest, name
 
     List<Map<String, dynamic>> getFiltered() {
       return allProducts.where((p) {
@@ -501,8 +515,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
               ],
             ),
             content: SizedBox(
-              width: 520,
-              height: 450,
+              width: 540,
+              height: 520,
               child: Column(
                 children: [
                   // ─── فلترة القسم ───
@@ -548,6 +562,65 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                   const SizedBox(height: 4),
                   // ─── حد المخزون المطبق ───
                   Text('الحد المطبق: مخزون ≤ $threshold', style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                  const SizedBox(height: 8),
+                  // ─── أعمدة التقرير ───
+                  Row(
+                    children: [
+                      const Text('أعمدة التقرير: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Wrap(
+                          spacing: 4,
+                          runSpacing: 2,
+                          children: allCols.map((c) => FilterChip(
+                            label: Text(c.$2, style: const TextStyle(fontSize: 10)),
+                            selected: selectedCols.contains(c.$1),
+                            onSelected: (v) => setDialogState(() {
+                              if (v) {
+                                selectedCols.add(c.$1);
+                              } else if (selectedCols.length > 1) {
+                                selectedCols.remove(c.$1);
+                              }
+                            }),
+                            selectedColor: AppTheme.primaryColor.withOpacity(0.15),
+                            checkmarkColor: AppTheme.primaryColor,
+                            visualDensity: VisualDensity.compact,
+                          )).toList(),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  // ─── ترتيب التقرير ───
+                  Row(
+                    children: [
+                      const Text('الترتيب: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      const SizedBox(width: 4),
+                      ChoiceChip(
+                        label: const Text('القسم ثم المخزون', style: TextStyle(fontSize: 10)),
+                        selected: reportSort == 'categoryStock',
+                        onSelected: (_) => setDialogState(() => reportSort = 'categoryStock'),
+                        selectedColor: AppTheme.primaryColor.withOpacity(0.15),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 4),
+                      ChoiceChip(
+                        label: const Text('الأقل أولاً', style: TextStyle(fontSize: 10)),
+                        selected: reportSort == 'lowest',
+                        onSelected: (_) => setDialogState(() => reportSort = 'lowest'),
+                        selectedColor: AppTheme.primaryColor.withOpacity(0.15),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 4),
+                      ChoiceChip(
+                        label: const Text('الاسم', style: TextStyle(fontSize: 10)),
+                        selected: reportSort == 'name',
+                        onSelected: (_) => setDialogState(() => reportSort = 'name'),
+                        selectedColor: AppTheme.primaryColor.withOpacity(0.15),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 8),
                   // أزرار تحديد الكل / إلغاء الكل
                   Row(
@@ -659,13 +732,19 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
     // ─── تصفية المنتجات المحددة ───
     final selected = allProducts.where((p) => selectedIds.contains(p['id'] as int)).toList();
     if (selected.isEmpty) return;
-    // ترتيب حسب القسم
+    // ترتيب التقرير
     selected.sort((a, b) {
-      final catA = (a['category'] as String?) ?? '';
-      final catB = (b['category'] as String?) ?? '';
-      final catCompare = catA.compareTo(catB);
-      if (catCompare != 0) return catCompare;
-      return (a['stock'] as int? ?? 0).compareTo(b['stock'] as int? ?? 0);
+      switch (reportSort) {
+        case 'lowest':
+          return (a['stock'] as int? ?? 0).compareTo(b['stock'] as int? ?? 0);
+        case 'name':
+          return (a['name'] as String? ?? '').compareTo(b['name'] as String? ?? '');
+        case 'categoryStock':
+        default:
+          final catCompare = (a['category'] as String? ?? '').compareTo(b['category'] as String? ?? '');
+          if (catCompare != 0) return catCompare;
+          return (a['stock'] as int? ?? 0).compareTo(b['stock'] as int? ?? 0);
+      }
     });
 
     try {
@@ -674,7 +753,14 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
       final doc = pw.Document();
       final now = DateTime.now();
       final dateStr = '${now.year}/${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')}';
+      final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
       final notes = notesCtrl.text.trim();
+      final storeName = await DatabaseHelper.instance.getSetting('store_name', defaultValue: 'أحلى الحلوين');
+      final storePhone = await DatabaseHelper.instance.getSetting('store_phone', defaultValue: '');
+
+      // ملخص
+      final totalItems = selected.length;
+      final totalQtyNeeded = selected.fold<int>(0, (sum, p) => sum + ((p['stock'] as int? ?? 0) > 0 ? threshold - (p['stock'] as int? ?? 0) : threshold));
 
       pw.TextStyle body({bool bold = false, double fontSize = 10}) => pw.TextStyle(
         font: arabicFont, fontSize: fontSize,
@@ -688,36 +774,71 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
         grouped.putIfAbsent(cat, () => []).add(p);
       }
 
+      // أعمدة التقرير المختارة
+      final colOrder = allCols.where((c) => selectedCols.contains(c.$1)).toList();
+
       doc.addPage(pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         textDirection: pw.TextDirection.rtl,
         build: (ctx) => [
+          // ─── الترويسة ───
           pw.Center(child: pw.Text('المنتجات قليلة المخزون', style: pw.TextStyle(font: arabicFont, fontSize: 18, fontWeight: pw.FontWeight.bold))),
+          pw.SizedBox(height: 2),
+          pw.Center(child: pw.Text(storeName, style: body(bold: true, fontSize: 12))),
+          if (storePhone.isNotEmpty)
+            pw.Center(child: pw.Text(storePhone, style: body(fontSize: 10))),
           pw.SizedBox(height: 4),
-          pw.Center(child: pw.Text('$dateStr  |  ${selected.length} منتج', style: body())),
-          pw.SizedBox(height: 16),
+          pw.Center(child: pw.Text('$dateStr  |  $timeStr', style: body())),
+
+          pw.SizedBox(height: 12),
+
+          // ─── الملخص ───
+          pw.Container(
+            width: double.infinity,
+            padding: const pw.EdgeInsets.all(10),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.grey100,
+              borderRadius: pw.BorderRadius.circular(6),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+              children: [
+                _pdfSummaryItem('$totalItems', 'منتج', body),
+                _pdfSummaryItem('$totalQtyNeeded', 'كمية ناقصة', body),
+                _pdfSummaryItem('$threshold', 'الحد المطبق', body),
+              ],
+            ),
+          ),
+
+          pw.SizedBox(height: 12),
 
           // ─── الجدول ───
           pw.TableHelper.fromTextArray(
             headerStyle: body(bold: true, fontSize: 11),
             cellStyle: body(fontSize: 10),
             headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
-            headers: ['#', 'المخزون', 'اللون', 'القسم', 'المنتج'],
+            headers: ['#', ...colOrder.map((c) => c.$2)],
             cellAlignment: pw.Alignment.centerRight,
             data: selected.asMap().entries.map((e) {
               final i = e.key + 1;
               final p = e.value;
-              final name = (p['name'] as String?) ?? '';
-              final category = (p['category'] as String?) ?? '';
-              final stock = (p['stock'] as int? ?? 0);
-              final color = (p['color'] as String?) ?? '';
-              return [
-                '$i',
-                '$stock',
-                color.isNotEmpty ? color : '—',
-                category,
-                name,
-              ];
+              final row = <String>['$i'];
+              for (final col in colOrder) {
+                switch (col.$1) {
+                  case 'name': row.add((p['name'] as String?) ?? ''); break;
+                  case 'category': row.add((p['category'] as String?) ?? ''); break;
+                  case 'color': row.add((p['color'] as String? ?? '').isNotEmpty ? p['color'] as String : '—'); break;
+                  case 'size': row.add((p['size'] as String? ?? '').isNotEmpty ? p['size'] as String : '—'); break;
+                  case 'stock':
+                    final s = p['stock'] as int? ?? 0;
+                    row.add('$s');
+                    break;
+                  case 'barcode': row.add((p['barcode'] as String? ?? '').isNotEmpty ? p['barcode'] as String : '—'); break;
+                  case 'purchase_price': row.add('${p['purchase_price'] ?? 0}'); break;
+                  case 'price': row.add('${p['price'] ?? 0}'); break;
+                }
+              }
+              return row;
             }).toList(),
           ),
 
@@ -769,6 +890,16 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
         );
       }
     }
+  }
+
+  // ─── عنصر ملخص في PDF ───
+  pw.Widget _pdfSummaryItem(String value, String label, pw.TextStyle Function({bool bold, double fontSize}) body) {
+    return pw.Column(
+      children: [
+        pw.Text(value, style: body(bold: true, fontSize: 16)),
+        pw.Text(label, style: body(fontSize: 9)),
+      ],
+    );
   }
 
   // إضافة باركود إضافي أثناء إضافة منتج جديد
