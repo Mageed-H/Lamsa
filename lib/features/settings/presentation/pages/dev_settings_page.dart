@@ -55,6 +55,13 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
   final _topSellingPinCtrl = TextEditingController();
   final _customersPinCtrl = TextEditingController();
   final _expensesPinCtrl = TextEditingController();
+  // هل الرمز معيّن حالياً؟ (لا نحمّل الـ hash في الحقل)
+  bool _productsPinSet = false;
+  bool _salesPinSet = false;
+  bool _debtsPinSet = false;
+  bool _topSellingPinSet = false;
+  bool _customersPinSet = false;
+  bool _expensesPinSet = false;
   String _selectedLogLevel = 'info';
   // طابعة الفواتير
   String _receiptPrinterName = '';
@@ -128,12 +135,19 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       _receiptMarginLeftCtrl.text = settings['receipt_margin_left_mm'] ?? settings['receipt_margin_mm'] ?? '5';
       _receiptMarginRightCtrl.text = settings['receipt_margin_right_mm'] ?? settings['receipt_margin_mm'] ?? '5';
       _qrUrlCtrl.text = settings['qr_url'] ?? '';
-      _productsPinCtrl.text = settings['products_pin'] ?? '';
-      _salesPinCtrl.text = settings['sales_pin'] ?? '';
-      _debtsPinCtrl.text = settings['debts_pin'] ?? '';
-      _topSellingPinCtrl.text = settings['top_selling_pin'] ?? '';
-      _customersPinCtrl.text = settings['customers_pin'] ?? '';
-      _expensesPinCtrl.text = settings['expenses_pin'] ?? '';
+      // رموز الحماية: نحفظ فقط حالة "معيّن أم لا" — لا نحمّل الـ hash في الحقل
+      _productsPinSet = (settings['products_pin'] ?? '').isNotEmpty;
+      _salesPinSet = (settings['sales_pin'] ?? '').isNotEmpty;
+      _debtsPinSet = (settings['debts_pin'] ?? '').isNotEmpty;
+      _topSellingPinSet = (settings['top_selling_pin'] ?? '').isNotEmpty;
+      _customersPinSet = (settings['customers_pin'] ?? '').isNotEmpty;
+      _expensesPinSet = (settings['expenses_pin'] ?? '').isNotEmpty;
+      _productsPinCtrl.clear();
+      _salesPinCtrl.clear();
+      _debtsPinCtrl.clear();
+      _topSellingPinCtrl.clear();
+      _customersPinCtrl.clear();
+      _expensesPinCtrl.clear();
       _selectedLogLevel = settings['log_level'] ?? 'info';
       ErrorLogger.instance.minLevel = LogLevel.fromString(_selectedLogLevel);
       // طابعة الفواتير — fallback للقيمة القديمة
@@ -149,6 +163,25 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
   Future<void> _loadCategories() async {
     final cats = await DatabaseHelper.instance.getAllCategories();
     if (mounted) setState(() => _categories = cats);
+  }
+
+  // إزالة قفل رمز صفحه
+  Future<void> _removePin(String settingKey) async {
+    await DatabaseHelper.instance.setSetting(settingKey, '');
+    if (!mounted) return;
+    setState(() {
+      switch (settingKey) {
+        case 'products_pin': _productsPinSet = false; break;
+        case 'sales_pin': _salesPinSet = false; break;
+        case 'debts_pin': _debtsPinSet = false; break;
+        case 'top_selling_pin': _topSellingPinSet = false; break;
+        case 'customers_pin': _customersPinSet = false; break;
+        case 'expenses_pin': _expensesPinSet = false; break;
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('تمت إزالة القفل ✓'), backgroundColor: AppTheme.successColor, duration: Duration(seconds: 2)),
+    );
   }
 
   Future<void> _addCategory() async {
@@ -244,6 +277,28 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSaving = true);
 
+    // ─── رموز الحماية: نحفظ فقط إذا أدخل المستخدم رمزاً جديداً ───
+    // الحقل الفارغ لا يمسح القفل — للمسح نستخدم زر "إزالة القفل"
+    final pinFutures = <Future>[];
+    if (_productsPinCtrl.text.trim().isNotEmpty) {
+      pinFutures.add(DatabaseHelper.instance.setSetting('products_pin', PinHash.hash(_productsPinCtrl.text.trim())));
+    }
+    if (_salesPinCtrl.text.trim().isNotEmpty) {
+      pinFutures.add(DatabaseHelper.instance.setSetting('sales_pin', PinHash.hash(_salesPinCtrl.text.trim())));
+    }
+    if (_debtsPinCtrl.text.trim().isNotEmpty) {
+      pinFutures.add(DatabaseHelper.instance.setSetting('debts_pin', PinHash.hash(_debtsPinCtrl.text.trim())));
+    }
+    if (_topSellingPinCtrl.text.trim().isNotEmpty) {
+      pinFutures.add(DatabaseHelper.instance.setSetting('top_selling_pin', PinHash.hash(_topSellingPinCtrl.text.trim())));
+    }
+    if (_customersPinCtrl.text.trim().isNotEmpty) {
+      pinFutures.add(DatabaseHelper.instance.setSetting('customers_pin', PinHash.hash(_customersPinCtrl.text.trim())));
+    }
+    if (_expensesPinCtrl.text.trim().isNotEmpty) {
+      pinFutures.add(DatabaseHelper.instance.setSetting('expenses_pin', PinHash.hash(_expensesPinCtrl.text.trim())));
+    }
+
     await Future.wait([
       DatabaseHelper.instance.setSetting('store_name', _storeNameCtrl.text.trim()),
       DatabaseHelper.instance.setSetting('store_phone', _storePhoneCtrl.text.trim()),
@@ -264,20 +319,24 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       DatabaseHelper.instance.setSetting('receipt_margin_bottom_mm', _receiptMarginBottomCtrl.text.trim()),
       DatabaseHelper.instance.setSetting('receipt_margin_left_mm', _receiptMarginLeftCtrl.text.trim()),
       DatabaseHelper.instance.setSetting('receipt_margin_right_mm', _receiptMarginRightCtrl.text.trim()),
-      DatabaseHelper.instance.setSetting('products_pin', _productsPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_productsPinCtrl.text.trim())),
-      DatabaseHelper.instance.setSetting('sales_pin', _salesPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_salesPinCtrl.text.trim())),
-      DatabaseHelper.instance.setSetting('debts_pin', _debtsPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_debtsPinCtrl.text.trim())),
-      DatabaseHelper.instance.setSetting('top_selling_pin', _topSellingPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_topSellingPinCtrl.text.trim())),
-      DatabaseHelper.instance.setSetting('customers_pin', _customersPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_customersPinCtrl.text.trim())),
-      DatabaseHelper.instance.setSetting('expenses_pin', _expensesPinCtrl.text.trim().isEmpty ? '' : PinHash.hash(_expensesPinCtrl.text.trim())),
       DatabaseHelper.instance.setSetting('log_level', _selectedLogLevel),
+      ...pinFutures,
     ]);
 
     // توليد QR SVG وحفظه بالكاش إذا الرابط تغير
     await _regenerateQrCache();
 
     if (!mounted) return;
-    setState(() => _isSaving = false);
+    setState(() {
+      _isSaving = false;
+      // تحديث حالة الأقفال بعد الحفظ
+      if (_productsPinCtrl.text.trim().isNotEmpty) { _productsPinSet = true; _productsPinCtrl.clear(); }
+      if (_salesPinCtrl.text.trim().isNotEmpty) { _salesPinSet = true; _salesPinCtrl.clear(); }
+      if (_debtsPinCtrl.text.trim().isNotEmpty) { _debtsPinSet = true; _debtsPinCtrl.clear(); }
+      if (_topSellingPinCtrl.text.trim().isNotEmpty) { _topSellingPinSet = true; _topSellingPinCtrl.clear(); }
+      if (_customersPinCtrl.text.trim().isNotEmpty) { _customersPinSet = true; _customersPinCtrl.clear(); }
+      if (_expensesPinCtrl.text.trim().isNotEmpty) { _expensesPinSet = true; _expensesPinCtrl.clear(); }
+    });
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -867,53 +926,53 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                   ),
                   const SizedBox(height: 16),
                   _buildSectionHeader('🔒  رموز الحماية (PIN)'),
-                  _buildSettingField(
+                  _buildPinField(
                     controller: _productsPinCtrl,
+                    isSet: _productsPinSet,
                     label: 'رمز صفحة المنتجات',
-                    hint: 'اتركه فارغاً لإلغاء القفل',
-                    icon: Icons.lock,
-                    keyboardType: TextInputType.number,
+                    settingKey: 'products_pin',
+                    onRemoved: () => setState(() => _productsPinSet = false),
                   ),
-                  _buildSettingField(
+                  _buildPinField(
                     controller: _salesPinCtrl,
+                    isSet: _salesPinSet,
                     label: 'رمز صفحة المبيعات',
-                    hint: 'اتركه فارغاً لإلغاء القفل',
-                    icon: Icons.lock,
-                    keyboardType: TextInputType.number,
+                    settingKey: 'sales_pin',
+                    onRemoved: () => setState(() => _salesPinSet = false),
                   ),
-                  _buildSettingField(
+                  _buildPinField(
                     controller: _debtsPinCtrl,
+                    isSet: _debtsPinSet,
                     label: 'رمز صفحة الديون',
-                    hint: 'اتركه فارغاً لإلغاء القفل',
-                    icon: Icons.lock,
-                    keyboardType: TextInputType.number,
+                    settingKey: 'debts_pin',
+                    onRemoved: () => setState(() => _debtsPinSet = false),
                   ),
-                  _buildSettingField(
+                  _buildPinField(
                     controller: _topSellingPinCtrl,
+                    isSet: _topSellingPinSet,
                     label: 'رمز صفحة الأكثر مبيعاً',
-                    hint: 'اتركه فارغاً لإلغاء القفل',
-                    icon: Icons.lock,
-                    keyboardType: TextInputType.number,
+                    settingKey: 'top_selling_pin',
+                    onRemoved: () => setState(() => _topSellingPinSet = false),
                   ),
-                  _buildSettingField(
+                  _buildPinField(
                     controller: _customersPinCtrl,
+                    isSet: _customersPinSet,
                     label: 'رمز صفحة العملاء',
-                    hint: 'اتركه فارغاً لإلغاء القفل',
-                    icon: Icons.lock,
-                    keyboardType: TextInputType.number,
+                    settingKey: 'customers_pin',
+                    onRemoved: () => setState(() => _customersPinSet = false),
                   ),
-                  _buildSettingField(
+                  _buildPinField(
                     controller: _expensesPinCtrl,
+                    isSet: _expensesPinSet,
                     label: 'رمز صفحة المصروفات',
-                    hint: 'اتركه فارغاً لإلغاء القفل',
-                    icon: Icons.lock,
-                    keyboardType: TextInputType.number,
+                    settingKey: 'expenses_pin',
+                    onRemoved: () => setState(() => _expensesPinSet = false),
                   ),
                   const Padding(
                     padding: EdgeInsets.only(bottom: 12),
                     child: Text(
-                      'ℹ️ إذا حددت رمزاً، سيُطلب عند الدخول لصفحة المنتجات أو المبيعات أو الديون أو العملاء أو المصروفات.',
-                      style: TextStyle(color: Colors.white38, fontSize: 11),
+                      'ℹ️ أدخل رمزاً جديداً ثم احفظ لتغيير القفل. الحقل الفارغ لا يمسح القفل — استخدم زر "إزالة".',
+                      style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.5),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -1212,6 +1271,86 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
           letterSpacing: 0.5,
         ),
       ),
+    );
+  }
+
+  // ─── حقل رمز PIN: يعرض حالة القفل أو حقل إدخال ───
+  Widget _buildPinField({
+    required TextEditingController controller,
+    required bool isSet,
+    required String label,
+    required String settingKey,
+    required VoidCallback onRemoved,
+  }) {
+    if (isSet) {
+      // القفل معيّن → عرض الحالة + زر الإزالة
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF37474F),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.lock, color: Colors.green.shade400, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '$label: معيّن ✓',
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ),
+              // حقل لتغيير الرمز
+              SizedBox(
+                width: 100,
+                child: TextFormField(
+                  controller: controller,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'رمز جديد',
+                    hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    filled: true,
+                    fillColor: const Color(0xFF263238),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.amber.shade600, width: 1.2),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // زر الإزالة
+              TextButton(
+                onPressed: () => _removePin(settingKey).then((_) => onRemoved()),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.errorColor,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: Size.zero,
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text('إزالة', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    // لا يوجد قفل → حقل إدخال عادي
+    return _buildSettingField(
+      controller: controller,
+      label: label,
+      hint: 'أدخل رمزاً (أرقام)',
+      icon: Icons.lock_open,
+      keyboardType: TextInputType.number,
     );
   }
 

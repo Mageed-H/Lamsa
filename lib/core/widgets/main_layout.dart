@@ -25,13 +25,9 @@ class MainLayout extends StatefulWidget {
 class _MainLayoutState extends State<MainLayout> {
   int _currentIndex = 0;
 
-  // الصفحات المقفلة/المفتوحة: true = مفتوح بعد إدخال PIN هذه الجلسة
-  bool _productsUnlocked = false;
-  bool _salesUnlocked = false;
-  bool _debtsUnlocked = false;
-  bool _topSellingUnlocked = false;
-  bool _customersUnlocked = false;
-  bool _expensesUnlocked = false;
+  // الصفحات المقفلة: مفاتيح تم التحقق منها بنجاح في هذه الجلسة
+  // لا يُضاف المفتاح إلا بعد إدخال PIN صحيح — القفل الفارغ لا يُثبّت
+  final Set<String> _sessionUnlockedKeys = <String>{};
 
   // تسلسل الأحرف السري لفتح صفحة المطور: Ctrl+Alt+Shift + d e v m h
   static const _devSequence = [
@@ -69,7 +65,8 @@ class _MainLayoutState extends State<MainLayout> {
   // ─── حوار طلب الرمز ───
   Future<bool> _askForPin(String settingKey, String pageTitle) async {
     final savedPin = await DatabaseHelper.instance.getSetting(settingKey, defaultValue: '');
-    if (savedPin.isEmpty) return true; // لا يوجد رمز = مفتوح
+    if (savedPin.isEmpty) return true; // لا يوجد رمز = مفتوح (لا يُثبّت شيء)
+    if (_sessionUnlockedKeys.contains(settingKey)) return true; // تم التحقق مسبقاً هذه الجلسة
 
     final pinCtrl = TextEditingController();
     String errorText = '';
@@ -137,52 +134,29 @@ class _MainLayoutState extends State<MainLayout> {
         },
       ),
     );
-    return result == true;
+
+    final ok = result == true;
+    if (ok) _sessionUnlockedKeys.add(settingKey); // ثبّت فقط بعد نجاح التحقق
+    return ok;
   }
 
   Future<void> _onTabTap(int index) async {
     if (index == _currentIndex) return;
 
-    // فحص PIN للمنتجات
-    if (index == 1 && !_productsUnlocked) {
-      final ok = await _askForPin('products_pin', 'المنتجات');
-      if (!ok) return;
-      _productsUnlocked = true;
-    }
+    // فحص PIN للصفحات المقفلة
+    const tabPins = <int, (String, String)>{
+      1: ('products_pin', 'المنتجات'),
+      2: ('sales_pin', 'المبيعات'),
+      3: ('debts_pin', 'الديون'),
+      4: ('customers_pin', 'العملاء'),
+      5: ('top_selling_pin', 'الأكثر مبيعاً'),
+      6: ('expenses_pin', 'المصروفات'),
+    };
 
-    // فحص PIN للمبيعات
-    if (index == 2 && !_salesUnlocked) {
-      final ok = await _askForPin('sales_pin', 'المبيعات');
+    final pinInfo = tabPins[index];
+    if (pinInfo != null) {
+      final ok = await _askForPin(pinInfo.$1, pinInfo.$2);
       if (!ok) return;
-      _salesUnlocked = true;
-    }
-
-    // فحص PIN للديون
-    if (index == 3 && !_debtsUnlocked) {
-      final ok = await _askForPin('debts_pin', 'الديون');
-      if (!ok) return;
-      _debtsUnlocked = true;
-    }
-
-    // فحص PIN للعملاء
-    if (index == 4 && !_customersUnlocked) {
-      final ok = await _askForPin('customers_pin', 'العملاء');
-      if (!ok) return;
-      _customersUnlocked = true;
-    }
-
-    // فحص PIN للأكثر مبيعاً
-    if (index == 5 && !_topSellingUnlocked) {
-      final ok = await _askForPin('top_selling_pin', 'الأكثر مبيعاً');
-      if (!ok) return;
-      _topSellingUnlocked = true;
-    }
-
-    // فحص PIN للمصروفات
-    if (index == 6 && !_expensesUnlocked) {
-      final ok = await _askForPin('expenses_pin', 'المصروفات');
-      if (!ok) return;
-      _expensesUnlocked = true;
     }
 
     setState(() => _currentIndex = index);
