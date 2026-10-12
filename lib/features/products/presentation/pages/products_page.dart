@@ -446,142 +446,219 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
   // ─── تصدير المنتجات قليلة المخزون PDF ───
   Future<void> _exportLowStockPdf() async {
     final db = await DatabaseHelper.instance.database;
-    final products = await db.query('products', orderBy: 'category ASC, stock ASC');
-    final lowStock = products.where((p) => (p['stock'] as int? ?? 0) <= 5).toList();
-    if (lowStock.isEmpty) {
+    final allProducts = await db.query('products', orderBy: 'category ASC, stock ASC');
+    final thresholdStr = await DatabaseHelper.instance.getSetting('low_stock_threshold', defaultValue: '5');
+    final threshold = int.tryParse(thresholdStr) ?? 5;
+    final categories = await DatabaseHelper.instance.getAllCategories();
+
+    if (allProducts.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('لا توجد منتجات قليلة المخزون (5 أو أقل)'), backgroundColor: AppTheme.warningColor),
+          const SnackBar(content: Text('لا توجد منتجات'), backgroundColor: AppTheme.warningColor),
         );
       }
       return;
     }
 
-    // ─── تحديد المنتجات ───
-    final selectedIds = lowStock.map((p) => p['id'] as int).toSet();
+    // ─── متغيرات الحوار ───
+    final selectedIds = <int>{};
+    String? filterCategory;
+    bool includeZero = false;
     final notesCtrl = TextEditingController();
+
+    List<Map<String, dynamic>> getFiltered() {
+      return allProducts.where((p) {
+        final stock = p['stock'] as int? ?? 0;
+        final isLow = stock <= threshold;
+        final isZero = stock == 0;
+        final stockOk = includeZero ? (isLow || isZero) : (isLow && stock > 0);
+        final catOk = filterCategory == null || filterCategory!.isEmpty || p['category'] == filterCategory;
+        return stockOk && catOk;
+      }).toList();
+    }
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Row(
-            children: [
-              const Icon(Icons.warning_amber, color: AppTheme.errorColor),
-              const SizedBox(width: 8),
-              const Text('المنتجات قليلة المخزون', style: TextStyle(fontWeight: FontWeight.bold)),
-              const Spacer(),
-              Text('${selectedIds.length}/${lowStock.length}', style: const TextStyle(fontSize: 14, color: AppTheme.primaryColor)),
-            ],
-          ),
-          content: SizedBox(
-            width: 500,
-            height: 400,
-            child: Column(
+        builder: (context, setDialogState) {
+          final filtered = getFiltered();
+          // تحديث التحديد: أزل المحددة اللي طلعت من الفلتر
+          final validIds = filtered.map((p) => p['id'] as int).toSet();
+          selectedIds.removeWhere((id) => !validIds.contains(id));
+          // حدد الكل تلقائياً عند أول فتح
+          if (selectedIds.isEmpty) {
+            selectedIds.addAll(validIds);
+          }
+
+          return AlertDialog(
+            title: Row(
               children: [
-                // أزرار تحديد الكل / إلغاء الكل
-                Row(
-                  children: [
-                    OutlinedButton(
-                      onPressed: () => setDialogState(() {
-                        selectedIds.addAll(lowStock.map((p) => p['id'] as int));
-                      }),
-                      child: const Text('تحديد الكل', style: TextStyle(fontSize: 12)),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton(
-                      onPressed: () => setDialogState(() => selectedIds.clear()),
-                      child: const Text('إلغاء الكل', style: TextStyle(fontSize: 12)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: lowStock.length,
-                    itemBuilder: (ctx, i) {
-                      final p = lowStock[i];
-                      final id = p['id'] as int;
-                      final name = p['name'] as String? ?? '';
-                      final category = p['category'] as String? ?? '';
-                      final stock = p['stock'] as int? ?? 0;
-                      final color = p['color'] as String? ?? '';
-                      final isSelected = selectedIds.contains(id);
-                      return CheckboxListTile(
-                        value: isSelected,
-                        onChanged: (v) => setDialogState(() {
-                          if (v == true) {
-                            selectedIds.add(id);
-                          } else {
-                            selectedIds.remove(id);
-                          }
-                        }),
-                        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        subtitle: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryColor.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(category, style: const TextStyle(fontSize: 11, color: AppTheme.primaryColor)),
-                            ),
-                            const SizedBox(width: 6),
-                            Text('المخزون: $stock', style: TextStyle(
-                              fontSize: 11,
-                              color: stock == 0 ? AppTheme.errorColor : AppTheme.textSecondary,
-                              fontWeight: FontWeight.bold,
-                            )),
-                            if (color.isNotEmpty) ...[
-                              const SizedBox(width: 6),
-                              Icon(Icons.circle, size: 10, color: _parseColor(color)),
-                              const SizedBox(width: 2),
-                              Text(color, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
-                            ],
-                          ],
-                        ),
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                      );
-                    },
-                  ),
-                ),
-                const Divider(),
-                // حقل الملاحظات
-                TextField(
-                  controller: notesCtrl,
-                  maxLines: 2,
-                  decoration: InputDecoration(
-                    hintText: 'ملاحظات (تظهر في نهاية التقرير)...',
-                    hintStyle: TextStyle(color: Colors.grey[400], fontSize: 12),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  ),
-                ),
+                const Icon(Icons.warning_amber, color: AppTheme.errorColor),
+                const SizedBox(width: 8),
+                const Text('المنتجات قليلة المخزون', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Text('${selectedIds.length}/${filtered.length}', style: const TextStyle(fontSize: 14, color: AppTheme.primaryColor)),
               ],
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.picture_as_pdf, size: 18),
-              label: Text('تصدير ${selectedIds.length} منتج', style: const TextStyle(fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryColor,
-                foregroundColor: Colors.white,
+            content: SizedBox(
+              width: 520,
+              height: 450,
+              child: Column(
+                children: [
+                  // ─── فلترة القسم ───
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () async {
+                            final result = await showCategoryPicker(context, categories, selected: filterCategory);
+                            if (result != null) setDialogState(() => filterCategory = result);
+                          },
+                          child: InputDecorator(
+                            decoration: InputDecoration(
+                              labelText: 'فلترة حسب القسم',
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              isDense: true,
+                              suffixIcon: filterCategory != null
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear, size: 18),
+                                      onPressed: () => setDialogState(() => filterCategory = null),
+                                    )
+                                  : const Icon(Icons.arrow_drop_down),
+                            ),
+                            child: Text(filterCategory ?? 'كل الأقسام', style: const TextStyle(fontSize: 13)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // ─── تضمين المنتجات النافدة ───
+                  CheckboxListTile(
+                    value: includeZero,
+                    onChanged: (v) => setDialogState(() {
+                      includeZero = v ?? false;
+                      selectedIds.clear();
+                    }),
+                    title: const Text('تضمين المنتجات النافدة (المخزون = 0)', style: TextStyle(fontSize: 13)),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  const SizedBox(height: 4),
+                  // ─── حد المخزون المطبق ───
+                  Text('الحد المطبق: مخزون ≤ $threshold', style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                  const SizedBox(height: 8),
+                  // أزرار تحديد الكل / إلغاء الكل
+                  Row(
+                    children: [
+                      OutlinedButton(
+                        onPressed: () => setDialogState(() {
+                          selectedIds.clear();
+                          selectedIds.addAll(getFiltered().map((p) => p['id'] as int));
+                        }),
+                        child: const Text('تحديد الكل', style: TextStyle(fontSize: 12)),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton(
+                        onPressed: () => setDialogState(() => selectedIds.clear()),
+                        child: const Text('إلغاء الكل', style: TextStyle(fontSize: 12)),
+                      ),
+                      const Spacer(),
+                      Text('${filtered.length} منتج', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: filtered.isEmpty
+                        ? const Center(child: Text('لا توجد منتجات مطابقة', style: TextStyle(color: AppTheme.textSecondary)))
+                        : ListView.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (ctx, i) {
+                        final p = filtered[i];
+                        final id = p['id'] as int;
+                        final name = p['name'] as String? ?? '';
+                        final category = p['category'] as String? ?? '';
+                        final stock = p['stock'] as int? ?? 0;
+                        final color = p['color'] as String? ?? '';
+                        final isSelected = selectedIds.contains(id);
+                        return CheckboxListTile(
+                          value: isSelected,
+                          onChanged: (v) => setDialogState(() {
+                            if (v == true) {
+                              selectedIds.add(id);
+                            } else {
+                              selectedIds.remove(id);
+                            }
+                          }),
+                          title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          subtitle: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryColor.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(category, style: const TextStyle(fontSize: 11, color: AppTheme.primaryColor)),
+                              ),
+                              const SizedBox(width: 6),
+                              Text('المخزون: $stock', style: TextStyle(
+                                fontSize: 11,
+                                color: stock == 0 ? AppTheme.errorColor : AppTheme.textSecondary,
+                                fontWeight: FontWeight.bold,
+                              )),
+                              if (color.isNotEmpty) ...[
+                                const SizedBox(width: 6),
+                                Icon(Icons.circle, size: 10, color: _parseColor(color)),
+                                const SizedBox(width: 2),
+                                Text(color, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                              ],
+                            ],
+                          ),
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                        );
+                      },
+                    ),
+                  ),
+                  const Divider(),
+                  // حقل الملاحظات
+                  TextField(
+                    controller: notesCtrl,
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      hintText: 'ملاحظات (تظهر في نهاية التقرير)...',
+                      hintStyle: TextStyle(color: Colors.grey[400], fontSize: 12),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                ],
               ),
-              onPressed: selectedIds.isEmpty ? null : () => Navigator.pop(ctx, true),
             ),
-          ],
-        ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.picture_as_pdf, size: 18),
+                label: Text('تصدير ${selectedIds.length} منتج', style: const TextStyle(fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryColor,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: selectedIds.isEmpty ? null : () => Navigator.pop(ctx, true),
+              ),
+            ],
+          );
+        },
       ),
     );
 
     if (confirmed != true || !mounted) return;
 
     // ─── تصفية المنتجات المحددة ───
-    final selected = lowStock.where((p) => selectedIds.contains(p['id'] as int)).toList();
+    final selected = allProducts.where((p) => selectedIds.contains(p['id'] as int)).toList();
+    if (selected.isEmpty) return;
     // ترتيب حسب القسم
     selected.sort((a, b) {
       final catA = (a['category'] as String?) ?? '';
