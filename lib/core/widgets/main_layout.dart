@@ -297,14 +297,22 @@ class _DevLockDialogState extends State<_DevLockDialog> {
   Future<void> _verify() async {
     final input = _ctrl.text.trim();
     if (input.isEmpty) {
-      setState(() => _error = 'أدخل كلمة السر + الوقت');
+      setState(() => _error = 'أدخل كلمة المرور');
       return;
     }
-    final ok = await DevLockService.instance.verify(input);
+    // إضافة الوقت الحالي تلقائياً (YYYYMMDDHHmm)
+    final now = DateTime.now();
+    final timeStr = '${now.year.toString().padLeft(4, '0')}'
+        '${now.month.toString().padLeft(2, '0')}'
+        '${now.day.toString().padLeft(2, '0')}'
+        '${now.hour.toString().padLeft(2, '0')}'
+        '${now.minute.toString().padLeft(2, '0')}';
+    final fullInput = '$input$timeStr';
+    final ok = await DevLockService.instance.verify(fullInput);
     if (ok) {
       if (mounted) Navigator.pop(context, true);
     } else {
-      setState(() => _error = 'كلمة السر خاطئة أو انتهى الوقت');
+      setState(() => _error = 'كلمة السر خاطئة');
       _ctrl.clear();
       _focus.requestFocus();
     }
@@ -323,7 +331,7 @@ class _DevLockDialogState extends State<_DevLockDialog> {
             obscureText: true,
             onSubmitted: (_) => _verify(),
             decoration: InputDecoration(
-              hintText: 'أدخل كلمة المرور',
+              hintText: 'أدخل كلمة المرور فقط',
               prefixIcon: const Icon(Icons.vpn_key, size: 18),
               errorText: _error,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
