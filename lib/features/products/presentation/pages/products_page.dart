@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/core/widgets/custom_button.dart';
@@ -479,6 +481,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
     ];
     // ترتيب التقرير
     String reportSort = 'categoryStock'; // categoryStock, lowest, name
+    // طريقة الإخراج
+    String outputMethod = 'desktop'; // desktop, custom, print
 
     List<Map<String, dynamic>> getFiltered() {
       return allProducts.where((p) {
@@ -622,6 +626,37 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                     ],
                   ),
                   const SizedBox(height: 8),
+                  // ─── طريقة الإخراج ───
+                  Row(
+                    children: [
+                      const Text('الإخراج: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      const SizedBox(width: 4),
+                      ChoiceChip(
+                        label: const Text('سطح المكتب', style: TextStyle(fontSize: 10)),
+                        selected: outputMethod == 'desktop',
+                        onSelected: (_) => setDialogState(() => outputMethod = 'desktop'),
+                        selectedColor: AppTheme.primaryColor.withOpacity(0.15),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 4),
+                      ChoiceChip(
+                        label: const Text('مجلد مخصص', style: TextStyle(fontSize: 10)),
+                        selected: outputMethod == 'custom',
+                        onSelected: (_) => setDialogState(() => outputMethod = 'custom'),
+                        selectedColor: AppTheme.primaryColor.withOpacity(0.15),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 4),
+                      ChoiceChip(
+                        label: const Text('طباعة مباشرة', style: TextStyle(fontSize: 10)),
+                        selected: outputMethod == 'print',
+                        onSelected: (_) => setDialogState(() => outputMethod = 'print'),
+                        selectedColor: AppTheme.primaryColor.withOpacity(0.15),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
                   // أزرار تحديد الكل / إلغاء الكل
                   Row(
                     children: [
@@ -713,8 +748,16 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
               ElevatedButton.icon(
-                icon: const Icon(Icons.picture_as_pdf, size: 18),
-                label: Text('تصدير ${selectedIds.length} منتج', style: const TextStyle(fontWeight: FontWeight.bold)),
+                icon: Icon(
+                  outputMethod == 'print' ? Icons.print : Icons.picture_as_pdf,
+                  size: 18,
+                ),
+                label: Text(
+                  outputMethod == 'print'
+                      ? 'طباعة ${selectedIds.length} منتج'
+                      : 'تصدير ${selectedIds.length} منتج',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryColor,
                   foregroundColor: Colors.white,
@@ -866,22 +909,60 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
       ));
 
       final pdfBytes = await doc.save();
-      final safeName = 'Low_Stock_$dateStr.pdf'.replaceAll('/', '-');
-      final userProfile = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '.';
-      final sep = Platform.pathSeparator;
-      final desktop = '$userProfile${sep}Desktop';
-      final desktopDir = Directory(desktop);
-      if (!await desktopDir.exists()) await desktopDir.create(recursive: true);
-      final file = File('$desktop$sep$safeName');
-      await file.writeAsBytes(pdfBytes);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('تم حفظ التقرير على سطح المكتب ✓\n$safeName (${selected.length} منتج)'),
-            backgroundColor: AppTheme.successColor,
-            duration: const Duration(seconds: 4),
-          ),
+
+      // ─── اسم ملف ديناميكي ───
+      final dateFileStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final catPart = (filterCategory != null && filterCategory!.isNotEmpty) ? '_$filterCategory' : '';
+      final safeName = 'Low_Stock$catPart _$dateFileStr.pdf'.replaceAll(RegExp(r'[\\/:*?"<>|]'), '-');
+
+      if (outputMethod == 'print') {
+        // ─── طباعة مباشرة ───
+        await Printing.layoutPdf(
+          onLayout: (_) => pdfBytes,
+          name: safeName,
         );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('تم إرسال التقرير للطابعة ✓\n(${selected.length} منتج)'),
+              backgroundColor: AppTheme.successColor,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } else if (outputMethod == 'custom') {
+        // ─── حفظ في مجلد مخصص ───
+        final dirPath = await FilePicker.platform.getDirectoryPath(dialogTitle: 'اختر مجلد الحفظ');
+        if (dirPath == null) return; // ألغى المستخدم
+        final file = File('$dirPath${Platform.pathSeparator}$safeName');
+        await file.writeAsBytes(pdfBytes);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('تم حفظ التقرير ✓\n$dirPath${Platform.pathSeparator}$safeName'),
+              backgroundColor: AppTheme.successColor,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } else {
+        // ─── حفظ على سطح المكتب (الافتراضي) ───
+        final userProfile = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '.';
+        final sep = Platform.pathSeparator;
+        final desktop = '$userProfile${sep}Desktop';
+        final desktopDir = Directory(desktop);
+        if (!await desktopDir.exists()) await desktopDir.create(recursive: true);
+        final file = File('$desktop$sep$safeName');
+        await file.writeAsBytes(pdfBytes);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('تم حفظ التقرير على سطح المكتب ✓\n$safeName (${selected.length} منتج)'),
+              backgroundColor: AppTheme.successColor,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
