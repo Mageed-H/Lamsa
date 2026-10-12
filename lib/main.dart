@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, PlatformDispatcher;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, File;
 import 'core/theme/app_theme.dart';
 import 'core/widgets/main_layout.dart';
 import 'core/database/database_helper.dart';
@@ -35,6 +35,26 @@ void main() async {
 
   // تهيئة قاعدة بيانات SQLite قبل فتح التطبيق حتى تكون جاهزة للاستعلامات السريعة
   await DatabaseHelper.instance.database;
+
+  // ─── إعادة تعيين الرموز: أنشئ ملف reset_pins.flag بجانب الـ exe ───
+  // (Flutter Windows لا يمرر command-line args بشكل موثوق في release)
+  try {
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final flagFile = File('$exeDir${Platform.pathSeparator}reset_pins.flag');
+    if (await flagFile.exists()) {
+      await flagFile.delete();
+      await DatabaseHelper.instance.setSetting('dev_pin_hash', '');
+      await DatabaseHelper.instance.setSetting('products_pin', '');
+      await DatabaseHelper.instance.setSetting('sales_pin', '');
+      await DatabaseHelper.instance.setSetting('debts_pin', '');
+      await DatabaseHelper.instance.setSetting('customers_pin', '');
+      await DatabaseHelper.instance.setSetting('top_selling_pin', '');
+      await DatabaseHelper.instance.setSetting('expenses_pin', '');
+      // تسجيل النتيجة بجانب الملف المحذوف
+      await File('$exeDir${Platform.pathSeparator}reset_pins_result.txt')
+          .writeAsString('تم تصفير جميع الرموز بنجاح ✓\n${DateTime.now()}');
+    }
+  } catch (_) {}
 
   // إعادة حساب نقاط الولاء (إصلاح بيانات قديمة)
   () async {
