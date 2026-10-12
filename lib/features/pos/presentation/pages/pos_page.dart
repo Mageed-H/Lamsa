@@ -1556,6 +1556,18 @@ class _PosPageState extends State<PosPage> {
           child: pw.Row(
             children: [
               pw.Expanded(
+                flex: 3,
+                child: pw.Text('$rowTotal', style: bodyBold(), textAlign: pw.TextAlign.center),
+              ),
+              pw.Expanded(
+                flex: 3,
+                child: pw.Text('$itemPrice', style: body(), textAlign: pw.TextAlign.center),
+              ),
+              pw.Expanded(
+                flex: 2,
+                child: pw.Text('x$qty', style: body(), textAlign: pw.TextAlign.center),
+              ),
+              pw.Expanded(
                 flex: 4,
                 child: pw.Column(
                   children: [
@@ -1575,18 +1587,6 @@ class _PosPageState extends State<PosPage> {
                     //   ),
                   ],
                 ),
-              ),
-              pw.Expanded(
-                flex: 2,
-                child: pw.Text('x$qty', style: body(), textAlign: pw.TextAlign.center),
-              ),
-              pw.Expanded(
-                flex: 3,
-                child: pw.Text('$itemPrice', style: body(), textAlign: pw.TextAlign.center),
-              ),
-              pw.Expanded(
-                flex: 3,
-                child: pw.Text('$rowTotal', style: bodyBold(), textAlign: pw.TextAlign.center),
               ),
             ],
           ),
@@ -1640,23 +1640,13 @@ class _PosPageState extends State<PosPage> {
               ],
               solidDiv,
               pw.SizedBox(height: 2),
-              // رأس الجدول (ترتيب RTL: اسم المادة | العدد | السعر | الإجمالي)
+              // رأس الجدول (ترتيب RTL: الإجمالي | السعر | العدد | اسم المادة)
               pw.Row(
                 children: [
                   pw.Expanded(
-                    flex: 4,
+                    flex: 3,
                     child: pw.Text(
-                      'اسم المادة',
-                      style: bodyBold(),
-                      textDirection: pw.TextDirection.rtl,
-                      textAlign: pw.TextAlign.center,
-                    ),
-                  ),
-
-                  pw.Expanded(
-                    flex: 2,
-                    child: pw.Text(
-                      'العدد',
+                      'الإجمالي',
                       style: bodyBold(),
                       textAlign: pw.TextAlign.center,
                     ),
@@ -1672,10 +1662,20 @@ class _PosPageState extends State<PosPage> {
                   ),
 
                   pw.Expanded(
-                    flex: 3,
+                    flex: 2,
                     child: pw.Text(
-                      'الإجمالي',
+                      'العدد',
                       style: bodyBold(),
+                      textAlign: pw.TextAlign.center,
+                    ),
+                  ),
+
+                  pw.Expanded(
+                    flex: 4,
+                    child: pw.Text(
+                      'اسم المادة',
+                      style: bodyBold(),
+                      textDirection: pw.TextDirection.rtl,
                       textAlign: pw.TextAlign.center,
                     ),
                   ),

@@ -691,8 +691,8 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
       final debts = isCustomerTab ? _debts : _shopDebts;
       final title = isCustomerTab ? 'تقرير ديون الزبائن' : 'تقرير ديون المحل';
       final headers = isCustomerTab
-          ? ['الزبون', 'الهاتف', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة']
-          : ['المورد', 'الهاتف', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة'];
+          ? ['الحالة', 'المتبقي', 'المدفوع', 'المبلغ', 'الهاتف', 'الزبون']
+          : ['الحالة', 'المتبقي', 'المدفوع', 'المبلغ', 'الهاتف', 'المورد'];
       final summary = isCustomerTab ? _summary : _shopSummary;
 
       pw.TextStyle bodyStyle({bool bold = false}) => pw.TextStyle(
@@ -726,12 +726,12 @@ class _DebtsPageState extends State<DebtsPage> with SingleTickerProviderStateMix
               final remaining = total - paid;
               final name = isCustomerTab ? (d['customer_name'] ?? '') : (d['supplier_name'] ?? '');
               return [
-                name,
-                d['phone'] ?? '',
-                '$total',
-                '$paid',
-                '$remaining',
                 remaining <= 0 ? 'مسدد' : 'غير مسدد',
+                '$remaining',
+                '$paid',
+                '$total',
+                d['phone'] ?? '',
+                name,
               ];
             }).toList(),
           ),

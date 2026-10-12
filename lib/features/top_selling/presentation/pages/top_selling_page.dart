@@ -594,18 +594,18 @@ class _TopSellingPageState extends State<TopSellingPage> {
                   headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
                   cellAlignment: pw.Alignment.centerRight,
                   headerAlignment: pw.Alignment.centerRight,
-                  headers: ['#', 'المنتج', 'اللون', 'القسم', 'الكمية', 'الإيراد', 'الربح'],
+                  headers: ['الربح', 'الإيراد', 'الكمية', 'القسم', 'اللون', 'المنتج', '#'],
                   data: _topProducts.asMap().entries.map((e) {
                     final i = e.key + 1;
                     final p = e.value;
                     return [
-                      '$i',
-                      '${p['name']}',
-                      '${p['color'] ?? ''}',
-                      '${p['category'] ?? ''}',
-                      '${p['total_sold']}',
-                      '${p['total_revenue']} د',
                       '${p['total_profit']} د',
+                      '${p['total_revenue']} د',
+                      '${p['total_sold']}',
+                      '${p['category'] ?? ''}',
+                      '${p['color'] ?? ''}',
+                      '${p['name']}',
+                      '$i',
                     ];
                   }).toList(),
                 ),

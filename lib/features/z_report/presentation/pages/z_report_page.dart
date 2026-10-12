@@ -297,11 +297,11 @@ class _ZReportPageState extends State<ZReportPage> {
             pw.TableHelper.fromTextArray(
               headerStyle: pw.TextStyle(font: arabicBold, fontSize: 11),
               cellStyle: pw.TextStyle(font: arabic, fontSize: 10),
-              headers: ['المنتج', 'الكمية', 'الإيراد'],
+              headers: ['الإيراد', 'الكمية', 'المنتج'],
               data: topProducts.map((p) => [
-                '${p['product_name'] ?? ''}',
-                '${p['total_qty'] ?? 0}',
                 '${p['total_revenue'] ?? 0} د.ع',
+                '${p['total_qty'] ?? 0}',
+                '${p['product_name'] ?? ''}',
               ]).toList(),
             ),
           ],

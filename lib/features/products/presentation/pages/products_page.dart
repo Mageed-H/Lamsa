@@ -860,28 +860,29 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
             headerStyle: body(bold: true, fontSize: 11),
             cellStyle: body(fontSize: 10),
             headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
-            headers: ['#', ...colOrder.map((c) => c.$2)],
+            headers: [...colOrder.reversed.map((c) => c.$2), '#'],
             cellAlignment: pw.Alignment.centerRight,
             data: selected.asMap().entries.map((e) {
               final i = e.key + 1;
               final p = e.value;
-              final row = <String>['$i'];
-              for (final col in colOrder) {
+              final cells = <String>[];
+              for (final col in colOrder.reversed.toList()) {
                 switch (col.$1) {
-                  case 'name': row.add((p['name'] as String?) ?? ''); break;
-                  case 'category': row.add((p['category'] as String?) ?? ''); break;
-                  case 'color': row.add((p['color'] as String? ?? '').isNotEmpty ? p['color'] as String : '—'); break;
-                  case 'size': row.add((p['size'] as String? ?? '').isNotEmpty ? p['size'] as String : '—'); break;
+                  case 'name': cells.add((p['name'] as String?) ?? ''); break;
+                  case 'category': cells.add((p['category'] as String?) ?? ''); break;
+                  case 'color': cells.add((p['color'] as String? ?? '').isNotEmpty ? p['color'] as String : '—'); break;
+                  case 'size': cells.add((p['size'] as String? ?? '').isNotEmpty ? p['size'] as String : '—'); break;
                   case 'stock':
                     final s = p['stock'] as int? ?? 0;
-                    row.add('$s');
+                    cells.add('$s');
                     break;
-                  case 'barcode': row.add((p['barcode'] as String? ?? '').isNotEmpty ? p['barcode'] as String : '—'); break;
-                  case 'purchase_price': row.add('${p['purchase_price'] ?? 0}'); break;
-                  case 'price': row.add('${p['price'] ?? 0}'); break;
+                  case 'barcode': cells.add((p['barcode'] as String? ?? '').isNotEmpty ? p['barcode'] as String : '—'); break;
+                  case 'purchase_price': cells.add('${p['purchase_price'] ?? 0}'); break;
+                  case 'price': cells.add('${p['price'] ?? 0}'); break;
                 }
               }
-              return row;
+              cells.add('$i');
+              return cells;
             }).toList(),
           ),
 

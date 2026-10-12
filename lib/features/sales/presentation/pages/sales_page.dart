@@ -304,25 +304,25 @@ class _SalesPageState extends State<SalesPage> {
           pw.Table(
             border: pw.TableBorder.all(width: 0.5),
             columnWidths: {
-              0: const pw.FlexColumnWidth(1),
-              1: const pw.FlexColumnWidth(1.2),
-              2: const pw.FlexColumnWidth(1.2),
+              0: const pw.FlexColumnWidth(3),
+              1: const pw.FlexColumnWidth(0.8),
+              2: const pw.FlexColumnWidth(1.5),
               3: const pw.FlexColumnWidth(1.2),
-              4: const pw.FlexColumnWidth(1.5),
-              5: const pw.FlexColumnWidth(0.8),
-              6: const pw.FlexColumnWidth(3),
+              4: const pw.FlexColumnWidth(1.2),
+              5: const pw.FlexColumnWidth(1.2),
+              6: const pw.FlexColumnWidth(1),
             },
             children: [
               pw.TableRow(
                 decoration: const pw.BoxDecoration(color: PdfColors.grey300),
                 children: [
-                  pdfCell('القطع', bold: true),
-                  pdfCell('الخصم', bold: true),
-                  pdfCell('الربح', bold: true),
-                  pdfCell('التكلفة', bold: true),
-                  pdfCell('المبلغ', bold: true),
-                  pdfCell('#', bold: true),
                   pdfCell('التاريخ', bold: true),
+                  pdfCell('#', bold: true),
+                  pdfCell('المبلغ', bold: true),
+                  pdfCell('التكلفة', bold: true),
+                  pdfCell('الربح', bold: true),
+                  pdfCell('الخصم', bold: true),
+                  pdfCell('القطع', bold: true),
                 ],
               ),
               ..._sales.map((sale) {
@@ -335,13 +335,13 @@ class _SalesPageState extends State<SalesPage> {
                 final date = (sale['created_at'] as String? ?? '').replaceAll('T', ' ');
                 final ds = date.length >= 16 ? date.substring(0, 16) : date;
                 return pw.TableRow(children: [
-                  pdfCell('$items'),
-                  pdfCell(discount > 0 ? '$discount' : '-'),
-                  pdfCell('$profit'),
-                  pdfCell('$cost'),
-                  pdfCell('$amount'),
-                  pdfCell('$id'),
                   pdfCell(ds),
+                  pdfCell('$id'),
+                  pdfCell('$amount'),
+                  pdfCell('$cost'),
+                  pdfCell('$profit'),
+                  pdfCell(discount > 0 ? '$discount' : '-'),
+                  pdfCell('$items'),
                 ]);
               }),
             ],
@@ -965,6 +965,9 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
             padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
             child: pw.Row(
               children: [
+                pw.Expanded(flex: 3, child: pw.Text('$rowTotal', style: bodyBold(), textAlign: pw.TextAlign.center)),
+                pw.Expanded(flex: 3, child: pw.Text('$itemPrice', style: body(), textAlign: pw.TextAlign.center)),
+                pw.Expanded(flex: 2, child: pw.Text('x$qty', style: body(), textAlign: pw.TextAlign.center)),
                 pw.Expanded(
                   flex: 4,
                   child: pw.Column(
@@ -975,9 +978,6 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
                     ],
                   ),
                 ),
-                pw.Expanded(flex: 2, child: pw.Text('x$qty', style: body(), textAlign: pw.TextAlign.center)),
-                pw.Expanded(flex: 3, child: pw.Text('$itemPrice', style: body(), textAlign: pw.TextAlign.center)),
-                pw.Expanded(flex: 3, child: pw.Text('$rowTotal', style: bodyBold(), textAlign: pw.TextAlign.center)),
               ],
             ),
           ),
@@ -1007,13 +1007,13 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
                 pw.Text('رقم الوصل: R${widget.saleId.toString().padLeft(6, '0')}', style: bodyBold(), textDirection: pw.TextDirection.rtl),
                 solidDiv,
                 pw.SizedBox(height: 2),
-                // رأس الجدول
+                // رأس الجدول (ترتيب RTL: الإجمالي | السعر | العدد | اسم المادة)
                 pw.Row(
                   children: [
-                    pw.Expanded(flex: 4, child: pw.Text('اسم المادة', style: bodyBold(), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center)),
-                    pw.Expanded(flex: 2, child: pw.Text('العدد', style: bodyBold(), textAlign: pw.TextAlign.center)),
-                    pw.Expanded(flex: 3, child: pw.Text('السعر', style: bodyBold(), textAlign: pw.TextAlign.center)),
                     pw.Expanded(flex: 3, child: pw.Text('الإجمالي', style: bodyBold(), textAlign: pw.TextAlign.center)),
+                    pw.Expanded(flex: 3, child: pw.Text('السعر', style: bodyBold(), textAlign: pw.TextAlign.center)),
+                    pw.Expanded(flex: 2, child: pw.Text('العدد', style: bodyBold(), textAlign: pw.TextAlign.center)),
+                    pw.Expanded(flex: 4, child: pw.Text('اسم المادة', style: bodyBold(), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center)),
                   ],
                 ),
                 pw.SizedBox(height: 2, child: pw.Divider(thickness: 0.8, color: PdfColors.black)),
