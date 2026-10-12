@@ -1943,6 +1943,9 @@ class DatabaseHelper {
           'created_at': now,
         });
         return true;
+      }).then((ok) {
+        if (ok) { productsRevision.value++; _notifyAll(); }
+        return ok;
       });
     } catch (e) {
       await ErrorLogger.instance.error('فشل تصحيح الجرد', data: {'product_id': productId, 'error': '$e'});

@@ -2632,6 +2632,7 @@ trailing: _isSelectionMode
           });
         }
       });
+      DatabaseHelper.productsRevision.value++;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('تم $opName $qty على ${_selectedProductIds.length} منتج'), backgroundColor: AppTheme.successColor),
@@ -2779,7 +2780,10 @@ trailing: _isSelectionMode
         backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
       ),
     );
-    if (ok) _showAdjustmentHistory(pid);
+    if (ok) {
+      _loadAllProducts();
+      _showAdjustmentHistory(pid);
+    }
   }
 
   /// عرض سجل تصحيحات الجرد لمنتج
