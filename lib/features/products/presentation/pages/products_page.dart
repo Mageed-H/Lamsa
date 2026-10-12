@@ -11,6 +11,73 @@ import 'package:cashier_system/core/widgets/custom_text_field.dart';
 import 'package:cashier_system/features/products/data/models/product_model.dart';
 import 'package:cashier_system/features/products/presentation/widgets/barcode_printer_widget.dart';
 
+// ─── قائمة اختيار القسم مع بحث (مشتركة بين جميع الأماكن) ───
+Future<String?> showCategoryPicker(BuildContext context, List<String> categories, {String? selected}) async {
+  final searchCtrl = TextEditingController();
+  String searchQuery = '';
+  return showModalBottomSheet<String>(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setSheetState) {
+        final filtered = categories.where((c) => c.contains(searchQuery)).toList();
+        return Container(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40, height: 4,
+                decoration: BoxDecoration(color: AppTheme.neutralColor, borderRadius: BorderRadius.circular(2)),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: TextField(
+                  controller: searchCtrl,
+                  autofocus: true,
+                  onChanged: (v) => setSheetState(() => searchQuery = v),
+                  decoration: InputDecoration(
+                    hintText: 'بحث عن قسم...',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: searchQuery.isNotEmpty
+                        ? IconButton(icon: const Icon(Icons.clear), onPressed: () { searchCtrl.clear(); setSheetState(() => searchQuery = ''); })
+                        : null,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: filtered.length,
+                  itemBuilder: (ctx, i) {
+                    final cat = filtered[i];
+                    final isSelected = cat == selected;
+                    return ListTile(
+                      leading: Icon(Icons.folder, color: isSelected ? AppTheme.primaryColor : AppTheme.textSecondary),
+                      title: Text(cat, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? AppTheme.primaryColor : null)),
+                      trailing: isSelected ? const Icon(Icons.check_circle, color: AppTheme.primaryColor) : null,
+                      onTap: () => Navigator.pop(ctx, cat),
+                    );
+                  },
+                ),
+              ),
+              if (filtered.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('لا توجد نتائج', style: TextStyle(color: AppTheme.textSecondary)),
+                ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
 class ProductsPage extends StatefulWidget {
   const ProductsPage({Key? key}) : super(key: key);
 
@@ -1020,16 +1087,21 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
             Row(
               children: [
                 Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: _selectedCategory,
-                    decoration: InputDecoration(
-                      labelText: 'القسم',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      filled: true,
-                      fillColor: AppTheme.surfaceColor,
+                  child: InkWell(
+                    onTap: () async {
+                      final result = await showCategoryPicker(context, _categories, selected: _selectedCategory);
+                      if (result != null) setState(() => _selectedCategory = result);
+                    },
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: 'القسم',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: AppTheme.surfaceColor,
+                        suffixIcon: const Icon(Icons.arrow_drop_down),
+                      ),
+                      child: Text(_selectedCategory ?? '', style: const TextStyle(fontSize: 16)),
                     ),
-                    items: _categories.map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
-                    onChanged: (val) => setState(() => _selectedCategory = val),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2360,11 +2432,15 @@ trailing: _isSelectionMode
         builder: (ctx) => AlertDialog(
           title: const Text('تغيير القسم للجميع'),
           content: StatefulBuilder(
-            builder: (ctx, setDialogState) => DropdownButtonFormField<String>(
-              value: selectedCat,
-              items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-              onChanged: (v) => setDialogState(() => selectedCat = v),
-              decoration: const InputDecoration(labelText: 'اختر القسم'),
+            builder: (ctx, setDialogState) => InkWell(
+              onTap: () async {
+                final result = await showCategoryPicker(context, categories, selected: selectedCat);
+                if (result != null) setDialogState(() => selectedCat = result);
+              },
+              child: InputDecorator(
+                decoration: const InputDecoration(labelText: 'اختر القسم', suffixIcon: Icon(Icons.arrow_drop_down)),
+                child: Text(selectedCat ?? '', style: const TextStyle(fontSize: 16)),
+              ),
             ),
           ),
           actions: [
@@ -3176,12 +3252,16 @@ class _EditProductDialogState extends State<_EditProductDialog> {
                 decoration: const InputDecoration(labelText: 'الاسم', border: OutlineInputBorder()),
               ),
               const SizedBox(height: 8),
-              // قائمة منسدلة للقسم
-              DropdownButtonFormField<String>(
-                value: _selectedCategory,
-                decoration: const InputDecoration(labelText: 'القسم', border: OutlineInputBorder()),
-                items: _categories.map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
-                onChanged: (val) => setState(() => _selectedCategory = val),
+              // قائمة قسم مع بحث
+              InkWell(
+                onTap: () async {
+                  final result = await showCategoryPicker(context, _categories, selected: _selectedCategory);
+                  if (result != null) setState(() => _selectedCategory = result);
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(labelText: 'القسم', border: OutlineInputBorder(), suffixIcon: Icon(Icons.arrow_drop_down)),
+                  child: Text(_selectedCategory ?? '', style: const TextStyle(fontSize: 16)),
+                ),
               ),
               const SizedBox(height: 8),
               Row(children: [
