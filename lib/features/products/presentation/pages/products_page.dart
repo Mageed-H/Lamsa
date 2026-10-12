@@ -157,7 +157,7 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
 
   // ─── الفلاتر والترتيب ───
   Map<int, Map<String, dynamic>> _productSalesStats = {};
-  String _sortBy = 'name'; // name, price, stock, profit, sold, lastSold
+  String _sortBy = 'name'; // name, price, stock, profit, sold, lastSold, lastAdded
   bool _sortAsc = true;
   bool _showFilters = false;
 
@@ -1389,6 +1389,9 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
           final bDate = _productSalesStats[b.id]?['last_sold_date'] ?? '';
           cmp = aDate.compareTo(bDate);
           break;
+        case 'lastAdded':
+          cmp = (a.id ?? 0).compareTo(b.id ?? 0);
+          break;
         case 'name':
         default:
           cmp = a.name.compareTo(b.name);
@@ -2240,6 +2243,7 @@ trailing: _isSelectionMode
               _buildSortOption('profit', 'الربح', Icons.trending_up, setSheetState),
               _buildSortOption('sold', 'الأكثر مبيعاً', Icons.star, setSheetState),
               _buildSortOption('lastSold', 'آخر بيع', Icons.access_time, setSheetState),
+              _buildSortOption('lastAdded', 'آخر إضافة', Icons.fiber_new, setSheetState),
               const SizedBox(height: 8),
               Row(
                 children: [
