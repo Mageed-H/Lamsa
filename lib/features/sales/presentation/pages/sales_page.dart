@@ -12,7 +12,8 @@ import 'package:cashier_system/features/sales/presentation/widgets/weekly_sales_
 enum SalesFilter { today, thisWeek, thisMonth, customMonth, customRange, all }
 
 class SalesPage extends StatefulWidget {
-  const SalesPage({Key? key}) : super(key: key);
+  final bool showProfit;
+  const SalesPage({Key? key, this.showProfit = true}) : super(key: key);
 
   @override
   State<SalesPage> createState() => _SalesPageState();
@@ -380,18 +381,20 @@ class _SalesPageState extends State<SalesPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('المبيعات', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(widget.showProfit ? 'المبيعات' : 'الفواتير القديمة', style: const TextStyle(fontWeight: FontWeight.bold)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.backup),
-            onPressed: _backupDatabase,
-            tooltip: 'نسخ احتياطي',
-          ),
-          IconButton(
-            icon: const Icon(Icons.picture_as_pdf),
-            onPressed: _sales.isEmpty ? null : _exportSalesReport,
-            tooltip: 'تصدير تقرير PDF',
-          ),
+          if (widget.showProfit) ...[
+            IconButton(
+              icon: const Icon(Icons.backup),
+              onPressed: _backupDatabase,
+              tooltip: 'نسخ احتياطي',
+            ),
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf),
+              onPressed: _sales.isEmpty ? null : _exportSalesReport,
+              tooltip: 'تصدير تقرير PDF',
+            ),
+          ],
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadData,
@@ -406,9 +409,11 @@ class _SalesPageState extends State<SalesPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  // رأس المال (قيمة المخزون الإجمالية)
-                  _buildInventoryCard(),
-                  const SizedBox(height: 12),
+                  // رأس المال (قيمة المخزون الإجمالية) — للمالك فقط
+                  if (widget.showProfit) ...[
+                    _buildInventoryCard(),
+                    const SizedBox(height: 12),
+                  ],
                   // ملخص اليوم
                   _buildSummaryCard(
                     title: 'مبيعات اليوم',
@@ -665,11 +670,13 @@ class _SalesPageState extends State<SalesPage> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _buildStatColumn('الإيرادات', '$rev د', AppTheme.primaryColor),
-            _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
-            _buildStatColumn('المصروفات', '$exp د', AppTheme.errorColor),
-            _buildStatColumn('الأرباح', '$pro د', AppTheme.successColor),
+            if (widget.showProfit) ...[
+              _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
+              _buildStatColumn('المصروفات', '$exp د', AppTheme.errorColor),
+              _buildStatColumn('الأرباح', '$pro د', AppTheme.successColor),
+              _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
+            ],
             _buildStatColumn('القطع', '$units', AppTheme.primaryColor),
-            _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
           ],
         ),
       ),
@@ -708,11 +715,13 @@ class _SalesPageState extends State<SalesPage> {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildStatColumn('الإيرادات', '$revenue د', AppTheme.primaryColor),
-                _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
-                _buildStatColumn('المصروفات', '$expenses د', AppTheme.errorColor),
-                _buildStatColumn('الأرباح', '$profit د', AppTheme.successColor),
+                if (widget.showProfit) ...[
+                  _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
+                  _buildStatColumn('المصروفات', '$expenses د', AppTheme.errorColor),
+                  _buildStatColumn('الأرباح', '$profit د', AppTheme.successColor),
+                  _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
+                ],
                 _buildStatColumn('القطع', '$units', AppTheme.primaryColor),
-                _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
               ],
             ),
           ],
@@ -793,7 +802,12 @@ class _SalesPageState extends State<SalesPage> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('$receiptNumber  |  ربح: $totalProfit د  |  $timeStr', style: const TextStyle(fontSize: 12)),
+            Text(
+              widget.showProfit
+                  ? '$receiptNumber  |  ربح: $totalProfit د  |  $timeStr'
+                  : '$receiptNumber  |  $timeStr',
+              style: const TextStyle(fontSize: 12),
+            ),
             if (saleCustomerName.isNotEmpty)
               Text('👤 $saleCustomerName', style: TextStyle(fontSize: 12, color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
           ],

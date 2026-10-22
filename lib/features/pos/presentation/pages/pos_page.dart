@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'dart:isolate';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
@@ -11,11 +11,12 @@ import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/features/products/data/models/product_model.dart';
 import 'package:cashier_system/core/services/error_logger.dart';
+import 'package:cashier_system/features/sales/presentation/pages/sales_page.dart';
 
 class PosPage extends StatefulWidget {
   const PosPage({Key? key}) : super(key: key);
 
-  /// تحديث حالة ظهور الصفحة — يُستدعى من MainLayout عند تبديل التبويب
+  /// طھط­ط¯ظٹط« ط­ط§ظ„ط© ط¸ظ‡ظˆط± ط§ظ„طµظپط­ط© â€” ظٹظڈط³طھط¯ط¹ظ‰ ظ…ظ† MainLayout ط¹ظ†ط¯ طھط¨ط¯ظٹظ„ ط§ظ„طھط¨ظˆظٹط¨
   static void setPageVisible(bool visible) {
     _PosPageState.instance?.setPageVisible(visible);
   }
@@ -25,27 +26,27 @@ class PosPage extends StatefulWidget {
 }
 
 class _PosPageState extends State<PosPage> {
-  // static instance للوصول من مستمع دورة الحياة
+  // static instance ظ„ظ„ظˆطµظˆظ„ ظ…ظ† ظ…ط³طھظ…ط¹ ط¯ظˆط±ط© ط§ظ„ط­ظٹط§ط©
   static _PosPageState? instance;
 
-  // هل الصفحة ظاهرة حالياً؟ (يُحدّث من MainLayout عند تبديل التبويب)
+  // ظ‡ظ„ ط§ظ„طµظپط­ط© ط¸ط§ظ‡ط±ط© ط­ط§ظ„ظٹط§ظ‹طں (ظٹظڈط­ط¯ظ‘ط« ظ…ظ† MainLayout ط¹ظ†ط¯ طھط¨ط¯ظٹظ„ ط§ظ„طھط¨ظˆظٹط¨)
   bool _isPageVisible = true;
 
-  // للتحكم بحقل الباركود وبقاء التركيز (Focus) عليه دائماً
+  // ظ„ظ„طھط­ظƒظ… ط¨ط­ظ‚ظ„ ط§ظ„ط¨ط§ط±ظƒظˆط¯ ظˆط¨ظ‚ط§ط، ط§ظ„طھط±ظƒظٹط² (Focus) ط¹ظ„ظٹظ‡ ط¯ط§ط¦ظ…ط§ظ‹
   final TextEditingController _barcodeController = TextEditingController();
   final FocusNode _barcodeFocusNode = FocusNode();
 
-  // سلة المشتريات (الفاتورة الحالية): نحفظ بيها المنتج والكمية
+  // ط³ظ„ط© ط§ظ„ظ…ط´طھط±ظٹط§طھ (ط§ظ„ظپط§طھظˆط±ط© ط§ظ„ط­ط§ظ„ظٹط©): ظ†ط­ظپط¸ ط¨ظٹظ‡ط§ ط§ظ„ظ…ظ†طھط¬ ظˆط§ظ„ظƒظ…ظٹط©
   final List<Map<String, dynamic>> _cart = [];
   bool _hasSuspendedOrders = false;
-  // منتجات المخزون المنخفض
+  // ظ…ظ†طھط¬ط§طھ ط§ظ„ظ…ط®ط²ظˆظ† ط§ظ„ظ…ظ†ط®ظپط¶
   List<ProductModel> _lowStockProducts = [];
-  // قائمة جميع المنتجات (للبحث)
+  // ظ‚ط§ط¦ظ…ط© ط¬ظ…ظٹط¹ ط§ظ„ظ…ظ†طھط¬ط§طھ (ظ„ظ„ط¨ط­ط«)
   List<ProductModel> _allProducts = [];
-  // الخصم
+  // ط§ظ„ط®طµظ…
   int _discountAmount = 0;
   bool _isDiscountPercent = false;
-  // آخر فاتورة (لإعادة الطباعة)
+  // ط¢ط®ط± ظپط§طھظˆط±ط© (ظ„ط¥ط¹ط§ط¯ط© ط§ظ„ط·ط¨ط§ط¹ط©)
   List<Map<String, dynamic>>? _lastPrintCart;
   int _lastPrintSubtotal = 0;
   int _lastPrintDiscount = 0;
@@ -54,11 +55,11 @@ class _PosPageState extends State<PosPage> {
   int _lastPrintChange = 0;
   int? _lastPrintSaleId;
   String? _lastPrintCustomerName;
-  // تصفية المنتجات
+  // طھطµظپظٹط© ط§ظ„ظ…ظ†طھط¬ط§طھ
   String? _posSelectedCategory;
-  // بحث بالاسم/اللون/القياس
+  // ط¨ط­ط« ط¨ط§ظ„ط§ط³ظ…/ط§ظ„ظ„ظˆظ†/ط§ظ„ظ‚ظٹط§ط³
   String _posSearchQuery = '';
-  // معرّف المسودة التلقائية الحالية
+  // ظ…ط¹ط±ظ‘ظپ ط§ظ„ظ…ط³ظˆط¯ط© ط§ظ„طھظ„ظ‚ط§ط¦ظٹط© ط§ظ„ط­ط§ظ„ظٹط©
   int? _autoDraftOrderId;
 
   @override
@@ -66,11 +67,11 @@ class _PosPageState extends State<PosPage> {
     super.initState();
     instance = this;
     DatabaseHelper.productsRevision.addListener(_loadAllProducts);
-    // مستمع يرجع التركيز تلقائياً لحقل الباركود كل ما يضيع
+    // ظ…ط³طھظ…ط¹ ظٹط±ط¬ط¹ ط§ظ„طھط±ظƒظٹط² طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ظ„ط­ظ‚ظ„ ط§ظ„ط¨ط§ط±ظƒظˆط¯ ظƒظ„ ظ…ط§ ظٹط¶ظٹط¹
     _barcodeFocusNode.addListener(_autoRefocus);
-    // مراقب دورة حياة التطبيق — يحفظ السلة تلقائياً عند الخروج
+    // ظ…ط±ط§ظ‚ط¨ ط¯ظˆط±ط© ط­ظٹط§ط© ط§ظ„طھط·ط¨ظٹظ‚ â€” ظٹط­ظپط¸ ط§ظ„ط³ظ„ط© طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¹ظ†ط¯ ط§ظ„ط®ط±ظˆط¬
     WidgetsBinding.instance.addObserver(_lifecycleObserver);
-    // أول ما تفتح الشاشة، نخلي التركيز تلقائياً على حقل الباركود
+    // ط£ظˆظ„ ظ…ط§ طھظپطھط­ ط§ظ„ط´ط§ط´ط©طŒ ظ†ط®ظ„ظٹ ط§ظ„طھط±ظƒظٹط² طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¹ظ„ظ‰ ط­ظ‚ظ„ ط§ظ„ط¨ط§ط±ظƒظˆط¯
     WidgetsBinding.instance.addPostFrameCallback((_) {
       FocusScope.of(context).requestFocus(_barcodeFocusNode);
       _checkSuspendedOrders();
@@ -90,15 +91,15 @@ class _PosPageState extends State<PosPage> {
     super.dispose();
   }
 
-  // مراقب دورة حياة التطبيق — يحفظ السلة عند الخروج للخلفية
+  // ظ…ط±ط§ظ‚ط¨ ط¯ظˆط±ط© ط­ظٹط§ط© ط§ظ„طھط·ط¨ظٹظ‚ â€” ظٹط­ظپط¸ ط§ظ„ط³ظ„ط© ط¹ظ†ط¯ ط§ظ„ط®ط±ظˆط¬ ظ„ظ„ط®ظ„ظپظٹط©
   final _lifecycleObserver = _PosLifecycleObserver();
 
-  // تنظيف مدخلات الماسح الضوئي من الرموز الزائدة (مثل {#\ اللي تطلع من تبديل أنماط Code128)
+  // طھظ†ط¸ظٹظپ ظ…ط¯ط®ظ„ط§طھ ط§ظ„ظ…ط§ط³ط­ ط§ظ„ط¶ظˆط¦ظٹ ظ…ظ† ط§ظ„ط±ظ…ظˆط² ط§ظ„ط²ط§ط¦ط¯ط© (ظ…ط«ظ„ {#\ ط§ظ„ظ„ظٹ طھط·ظ„ط¹ ظ…ظ† طھط¨ط¯ظٹظ„ ط£ظ†ظ…ط§ط· Code128)
   String _cleanBarcode(String raw) {
     return raw.trim().replaceAll(RegExp(r'[^a-zA-Z0-9\-]'), '');
   }
 
-  // الدالة السحرية اللي تشتغل من نضرب الباركود بالجهاز
+  // ط§ظ„ط¯ط§ظ„ط© ط§ظ„ط³ط­ط±ظٹط© ط§ظ„ظ„ظٹ طھط´طھط؛ظ„ ظ…ظ† ظ†ط¶ط±ط¨ ط§ظ„ط¨ط§ط±ظƒظˆط¯ ط¨ط§ظ„ط¬ظ‡ط§ط²
   Future<void> _onBarcodeScanned(String barcode) async {
     try {
     final cleanBarcode = _cleanBarcode(barcode);
@@ -107,13 +108,13 @@ class _PosPageState extends State<PosPage> {
       return;
     }
 
-    // نبحث عن المنتج بقاعدة البيانات المحلية (بسرعة البرق)
+    // ظ†ط¨ط­ط« ط¹ظ† ط§ظ„ظ…ظ†طھط¬ ط¨ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط­ظ„ظٹط© (ط¨ط³ط±ط¹ط© ط§ظ„ط¨ط±ظ‚)
     final product = await DatabaseHelper.instance.getProductByBarcode(
       cleanBarcode,
     );
 
     if (product != null) {
-      // فحص المخزون قبل الإضافة
+      // ظپط­طµ ط§ظ„ظ…ط®ط²ظˆظ† ظ‚ط¨ظ„ ط§ظ„ط¥ط¶ط§ظپط©
       final int currentInCart = _cart
           .where((i) => (i['product'] as ProductModel).id == product.id)
           .fold<int>(0, (s, i) => s + (i['quantity'] as int));
@@ -122,7 +123,7 @@ class _PosPageState extends State<PosPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'لا يمكن إضافة المزيد! المخزون من “${product.name}” = ${product.stock} قطعة',
+                'ظ„ط§ ظٹظ…ظƒظ† ط¥ط¶ط§ظپط© ط§ظ„ظ…ط²ظٹط¯! ط§ظ„ظ…ط®ط²ظˆظ† ظ…ظ† â€œ${product.name}â€‌ = ${product.stock} ظ‚ط·ط¹ط©',
               ),
               backgroundColor: AppTheme.errorColor,
               duration: const Duration(seconds: 3),
@@ -134,20 +135,20 @@ class _PosPageState extends State<PosPage> {
         return;
       }
       setState(() {
-        // إذا المنتج موجود مسبقاً بالفاتورة، نزيد الكمية فقط
+        // ط¥ط°ط§ ط§ظ„ظ…ظ†طھط¬ ظ…ظˆط¬ظˆط¯ ظ…ط³ط¨ظ‚ط§ظ‹ ط¨ط§ظ„ظپط§طھظˆط±ط©طŒ ظ†ط²ظٹط¯ ط§ظ„ظƒظ…ظٹط© ظپظ‚ط·
         int index = _cart.indexWhere(
           (item) => (item['product'] as ProductModel).id == product.id,
         );
         if (index >= 0) {
           _cart[index]['quantity'] = (_cart[index]['quantity'] as int) + 1;
         } else {
-          // إذا منتج جديد، نضيفه للفاتورة بكمية 1
+          // ط¥ط°ط§ ظ…ظ†طھط¬ ط¬ط¯ظٹط¯طŒ ظ†ط¶ظٹظپظ‡ ظ„ظ„ظپط§طھظˆط±ط© ط¨ظƒظ…ظٹط© 1
           _cart.add({'product': product, 'quantity': 1});
         }
         _posSearchQuery = '';
       });
 
-      // فحص المخزون وتنبيه إذا كان قليلاً
+      // ظپط­طµ ط§ظ„ظ…ط®ط²ظˆظ† ظˆطھظ†ط¨ظٹظ‡ ط¥ط°ط§ ظƒط§ظ† ظ‚ظ„ظٹظ„ط§ظ‹
       final thresholdStr = await DatabaseHelper.instance.getSetting(
         'low_stock_threshold',
         defaultValue: '5',
@@ -162,8 +163,8 @@ class _PosPageState extends State<PosPage> {
           SnackBar(
             content: Text(
               remaining <= 0
-                  ? '⚠️ تحذير: مخزون "${product.name}" نفد بالكامل!'
-                  : '⚠️ تنبيه: المخزون المتبقي من "${product.name}" = $remaining قطعة فقط!',
+                  ? 'âڑ ï¸ڈ طھط­ط°ظٹط±: ظ…ط®ط²ظˆظ† "${product.name}" ظ†ظپط¯ ط¨ط§ظ„ظƒط§ظ…ظ„!'
+                  : 'âڑ ï¸ڈ طھظ†ط¨ظٹظ‡: ط§ظ„ظ…ط®ط²ظˆظ† ط§ظ„ظ…طھط¨ظ‚ظٹ ظ…ظ† "${product.name}" = $remaining ظ‚ط·ط¹ط© ظپظ‚ط·!',
             ),
             backgroundColor: remaining <= 0
                 ? AppTheme.errorColor
@@ -173,12 +174,12 @@ class _PosPageState extends State<PosPage> {
         );
       }
     } else {
-      // تطبيق Robustness: إذا الباركود غلط، ننبه الكاشير بدون ما يكرش النظام
+      // طھط·ط¨ظٹظ‚ Robustness: ط¥ط°ط§ ط§ظ„ط¨ط§ط±ظƒظˆط¯ ط؛ظ„ط·طŒ ظ†ظ†ط¨ظ‡ ط§ظ„ظƒط§ط´ظٹط± ط¨ط¯ظˆظ† ظ…ط§ ظٹظƒط±ط´ ط§ظ„ظ†ط¸ط§ظ…
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'المنتج غير موجود في قاعدة البيانات!',
+              'ط§ظ„ظ…ظ†طھط¬ ط؛ظٹط± ظ…ظˆط¬ظˆط¯ ظپظٹ ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ!',
               style: TextStyle(fontFamily: 'Tahoma'),
             ),
             backgroundColor: AppTheme.errorColor,
@@ -188,14 +189,14 @@ class _PosPageState extends State<PosPage> {
       }
     }
 
-    // نفرغ الحقل ونرجع التركيز عليه استعداداً للقطعة اللي بعدها
+    // ظ†ظپط±ط؛ ط§ظ„ط­ظ‚ظ„ ظˆظ†ط±ط¬ط¹ ط§ظ„طھط±ظƒظٹط² ط¹ظ„ظٹظ‡ ط§ط³طھط¹ط¯ط§ط¯ط§ظ‹ ظ„ظ„ظ‚ط·ط¹ط© ط§ظ„ظ„ظٹ ط¨ط¹ط¯ظ‡ط§
     _barcodeController.clear();
     _keepFocus();
     } catch (e, st) {
-      await ErrorLogger.instance.logError(e, st, context: 'مسح باركود');
+      await ErrorLogger.instance.logError(e, st, context: 'ظ…ط³ط­ ط¨ط§ط±ظƒظˆط¯');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ في المسح: $e'), backgroundColor: AppTheme.errorColor),
+          SnackBar(content: Text('ط®ط·ط£ ظپظٹ ط§ظ„ظ…ط³ط­: $e'), backgroundColor: AppTheme.errorColor),
         );
       }
       _barcodeController.clear();
@@ -203,24 +204,24 @@ class _PosPageState extends State<PosPage> {
     }
   }
 
-  // دالة مساعدة للحفاظ على التركيز
+  // ط¯ط§ظ„ط© ظ…ط³ط§ط¹ط¯ط© ظ„ظ„ط­ظپط§ط¸ ط¹ظ„ظ‰ ط§ظ„طھط±ظƒظٹط²
   void _keepFocus() {
     if (!_isPageVisible || !mounted) return;
     FocusScope.of(context).requestFocus(_barcodeFocusNode);
   }
 
-  // تحديث حالة الظهور — يُستدعى من MainLayout عند تبديل التبويب
+  // طھط­ط¯ظٹط« ط­ط§ظ„ط© ط§ظ„ط¸ظ‡ظˆط± â€” ظٹظڈط³طھط¯ط¹ظ‰ ظ…ظ† MainLayout ط¹ظ†ط¯ طھط¨ط¯ظٹظ„ ط§ظ„طھط¨ظˆظٹط¨
   void setPageVisible(bool visible) {
     _isPageVisible = visible;
     if (visible && mounted) {
       _loadAllProducts();
     } else if (!visible && mounted) {
-      // لما الصفحة تختفي، نزيل المؤشر من حقل الباركود
+      // ظ„ظ…ط§ ط§ظ„طµظپط­ط© طھط®طھظپظٹطŒ ظ†ط²ظٹظ„ ط§ظ„ظ…ط¤ط´ط± ظ…ظ† ط­ظ‚ظ„ ط§ظ„ط¨ط§ط±ظƒظˆط¯
       _barcodeFocusNode.unfocus();
     }
   }
 
-  // حفظ السلة تلقائياً عند الخروج للخلفية
+  // ط­ظپط¸ ط§ظ„ط³ظ„ط© طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¹ظ†ط¯ ط§ظ„ط®ط±ظˆط¬ ظ„ظ„ط®ظ„ظپظٹط©
   void _saveAutoDraft() {
     if (_cart.isNotEmpty) {
       DatabaseHelper.instance.saveAutoDraft(
@@ -231,7 +232,7 @@ class _PosPageState extends State<PosPage> {
     }
   }
 
-  // استرجاع المسودة التلقائية عند بدء التطبيق
+  // ط§ط³طھط±ط¬ط§ط¹ ط§ظ„ظ…ط³ظˆط¯ط© ط§ظ„طھظ„ظ‚ط§ط¦ظٹط© ط¹ظ†ط¯ ط¨ط¯ط، ط§ظ„طھط·ط¨ظٹظ‚
   Future<void> _restoreAutoDraft() async {
     final draft = await DatabaseHelper.instance.loadAutoDraft();
     if (draft == null || !mounted) return;
@@ -241,14 +242,14 @@ class _PosPageState extends State<PosPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('استرجاع السلة', style: TextStyle(color: AppTheme.primaryColor)),
-        content: Text('وجدنا سلة محفوظة من آخر مرة (${cart.length} صنف).\nهل تريد استرجاعها؟'),
+        title: const Text('ط§ط³طھط±ط¬ط§ط¹ ط§ظ„ط³ظ„ط©', style: TextStyle(color: AppTheme.primaryColor)),
+        content: Text('ظˆط¬ط¯ظ†ط§ ط³ظ„ط© ظ…ط­ظپظˆط¸ط© ظ…ظ† ط¢ط®ط± ظ…ط±ط© (${cart.length} طµظ†ظپ).\nظ‡ظ„ طھط±ظٹط¯ ط§ط³طھط±ط¬ط§ط¹ظ‡ط§طں'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('لا')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('ظ„ط§')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('نعم، استرجاع'),
+            child: const Text('ظ†ط¹ظ…طŒ ط§ط³طھط±ط¬ط§ط¹'),
           ),
         ],
       ),
@@ -262,10 +263,10 @@ class _PosPageState extends State<PosPage> {
       });
       _autoDraftOrderId = draft['order_id'] as int?;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تم استرجاع السلة (${cart.length} صنف)'), backgroundColor: AppTheme.successColor),
+        SnackBar(content: Text('طھظ… ط§ط³طھط±ط¬ط§ط¹ ط§ظ„ط³ظ„ط© (${cart.length} طµظ†ظپ)'), backgroundColor: AppTheme.successColor),
       );
     } else {
-      // حذف المسودة إذا المستخدم رفض الاسترجاع
+      // ط­ط°ظپ ط§ظ„ظ…ط³ظˆط¯ط© ط¥ط°ط§ ط§ظ„ظ…ط³طھط®ط¯ظ… ط±ظپط¶ ط§ظ„ط§ط³طھط±ط¬ط§ط¹
       final orderId = draft['order_id'] as int?;
       if (orderId != null) {
         await DatabaseHelper.instance.clearAutoDraft(orderId);
@@ -273,7 +274,7 @@ class _PosPageState extends State<PosPage> {
     }
   }
 
-  // إضافة منتج مباشرة من الكروت (بدون باركود)
+  // ط¥ط¶ط§ظپط© ظ…ظ†طھط¬ ظ…ط¨ط§ط´ط±ط© ظ…ظ† ط§ظ„ظƒط±ظˆطھ (ط¨ط¯ظˆظ† ط¨ط§ط±ظƒظˆط¯)
   void _addProductToCart(ProductModel product) {
     final int currentInCart = _cart
         .where((i) => (i['product'] as ProductModel).id == product.id)
@@ -282,7 +283,7 @@ class _PosPageState extends State<PosPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('لا يمكن إضافة المزيد! المخزون من "${product.name}" = ${product.stock} قطعة'),
+            content: Text('ظ„ط§ ظٹظ…ظƒظ† ط¥ط¶ط§ظپط© ط§ظ„ظ…ط²ظٹط¯! ط§ظ„ظ…ط®ط²ظˆظ† ظ…ظ† "${product.name}" = ${product.stock} ظ‚ط·ط¹ط©'),
             backgroundColor: AppTheme.errorColor,
             duration: const Duration(seconds: 3),
           ),
@@ -303,12 +304,12 @@ class _PosPageState extends State<PosPage> {
   List<ProductModel> get _filteredPosProducts {
     var list = _allProducts;
 
-    // فلترة حسب القسم المحدد
+    // ظپظ„طھط±ط© ط­ط³ط¨ ط§ظ„ظ‚ط³ظ… ط§ظ„ظ…ط­ط¯ط¯
     if (_posSelectedCategory != null && _posSelectedCategory!.isNotEmpty) {
       list = list.where((p) => p.category == _posSelectedCategory).toList();
     }
 
-    // فلترة ذكية بالاسم/اللون/القياس
+    // ظپظ„طھط±ط© ط°ظƒظٹط© ط¨ط§ظ„ط§ط³ظ…/ط§ظ„ظ„ظˆظ†/ط§ظ„ظ‚ظٹط§ط³
     if (_posSearchQuery.isNotEmpty) {
       final query = _posSearchQuery.toLowerCase();
       final words = query.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
@@ -329,8 +330,8 @@ class _PosPageState extends State<PosPage> {
     return list;
   }
 
-  // يرجع التركيز تلقائياً لحقل الباركود بعد كل فريم إذا ضاع
-  // لكن فقط إذا الصفحة هي الـ route النشط (ما يسرق الفوكس من الحوارات)
+  // ظٹط±ط¬ط¹ ط§ظ„طھط±ظƒظٹط² طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ظ„ط­ظ‚ظ„ ط§ظ„ط¨ط§ط±ظƒظˆط¯ ط¨ط¹ط¯ ظƒظ„ ظپط±ظٹظ… ط¥ط°ط§ ط¶ط§ط¹
+  // ظ„ظƒظ† ظپظ‚ط· ط¥ط°ط§ ط§ظ„طµظپط­ط© ظ‡ظٹ ط§ظ„ظ€ route ط§ظ„ظ†ط´ط· (ظ…ط§ ظٹط³ط±ظ‚ ط§ظ„ظپظˆظƒط³ ظ…ظ† ط§ظ„ط­ظˆط§ط±ط§طھ)
   void _autoRefocus() {
     if (!_isPageVisible || !_barcodeFocusNode.hasFocus || !mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -348,11 +349,11 @@ class _PosPageState extends State<PosPage> {
     if (mounted) setState(() => _hasSuspendedOrders = orders.isNotEmpty);
   }
 
-  // تعليق الفاتورة وحفظها في القاعدة
+  // طھط¹ظ„ظٹظ‚ ط§ظ„ظپط§طھظˆط±ط© ظˆط­ظپط¸ظ‡ط§ ظپظٹ ط§ظ„ظ‚ط§ط¹ط¯ط©
   Future<void> _suspendOrder() async {
     if (_cart.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('الفاتورة فارغة، لا يوجد ما يُعلّق!')),
+        const SnackBar(content: Text('ط§ظ„ظپط§طھظˆط±ط© ظپط§ط±ط؛ط©طŒ ظ„ط§ ظٹظˆط¬ط¯ ظ…ط§ ظٹظڈط¹ظ„ظ‘ظ‚!')),
       );
       return;
     }
@@ -361,21 +362,21 @@ class _PosPageState extends State<PosPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text(
-          'تعليق الفاتورة',
+          'طھط¹ظ„ظٹظ‚ ط§ظ„ظپط§طھظˆط±ط©',
           style: TextStyle(color: AppTheme.warningColor),
         ),
         content: TextField(
           controller: noteController,
           autofocus: true,
           decoration: const InputDecoration(
-            hintText: 'ملاحظة اختيارية (مثال: زبونة بالباب)',
+            hintText: 'ظ…ظ„ط§ط­ط¸ط© ط§ط®طھظٹط§ط±ظٹط© (ظ…ط«ط§ظ„: ط²ط¨ظˆظ†ط© ط¨ط§ظ„ط¨ط§ط¨)',
             border: OutlineInputBorder(),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء'),
+            child: const Text('ط¥ظ„ط؛ط§ط،'),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -383,7 +384,7 @@ class _PosPageState extends State<PosPage> {
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('تعليق'),
+            child: const Text('طھط¹ظ„ظٹظ‚'),
           ),
         ],
       ),
@@ -395,12 +396,12 @@ class _PosPageState extends State<PosPage> {
         discountAmount: _discountAmount,
         isDiscountPercent: _isDiscountPercent,
       );
-      // فشل الحفظ: السلة تبقى كما هي — الكاشير لا يخسر شيئاً
+      // ظپط´ظ„ ط§ظ„ط­ظپط¸: ط§ظ„ط³ظ„ط© طھط¨ظ‚ظ‰ ظƒظ…ط§ ظ‡ظٹ â€” ط§ظ„ظƒط§ط´ظٹط± ظ„ط§ ظٹط®ط³ط± ط´ظٹط¦ط§ظ‹
       if (orderId <= 0) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('فشل تعليق الفاتورة! السلة محفوظة — حاول مجدداً'),
+              content: Text('ظپط´ظ„ طھط¹ظ„ظٹظ‚ ط§ظ„ظپط§طھظˆط±ط©! ط§ظ„ط³ظ„ط© ظ…ط­ظپظˆط¸ط© â€” ط­ط§ظˆظ„ ظ…ط¬ط¯ط¯ط§ظ‹'),
               backgroundColor: AppTheme.errorColor,
             ),
           );
@@ -417,7 +418,7 @@ class _PosPageState extends State<PosPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('تم تعليق الفاتورة بنجاح ✓'),
+            content: Text('طھظ… طھط¹ظ„ظٹظ‚ ط§ظ„ظپط§طھظˆط±ط© ط¨ظ†ط¬ط§ط­ âœ“'),
             backgroundColor: AppTheme.warningColor,
           ),
         );
@@ -426,7 +427,7 @@ class _PosPageState extends State<PosPage> {
     }
   }
 
-  // تقليل كمية منتج في السلة (أو حذفه إذا وصل لـ 0)
+  // طھظ‚ظ„ظٹظ„ ظƒظ…ظٹط© ظ…ظ†طھط¬ ظپظٹ ط§ظ„ط³ظ„ط© (ط£ظˆ ط­ط°ظپظ‡ ط¥ط°ط§ ظˆطµظ„ ظ„ظ€ 0)
   void _decreaseQty(int index) {
     setState(() {
       if ((_cart[index]['quantity'] as int) > 1) {
@@ -438,7 +439,7 @@ class _PosPageState extends State<PosPage> {
     _keepFocus();
   }
 
-  // زيادة كمية منتج في السلة
+  // ط²ظٹط§ط¯ط© ظƒظ…ظٹط© ظ…ظ†طھط¬ ظپظٹ ط§ظ„ط³ظ„ط©
   void _increaseQty(int index) {
     final product = _cart[index]['product'] as ProductModel;
     final qty = _cart[index]['quantity'] as int;
@@ -446,7 +447,7 @@ class _PosPageState extends State<PosPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'لا يمكن إضافة المزيد! المخزون من “${product.name}” = ${product.stock} قطعة',
+            'ظ„ط§ ظٹظ…ظƒظ† ط¥ط¶ط§ظپط© ط§ظ„ظ…ط²ظٹط¯! ط§ظ„ظ…ط®ط²ظˆظ† ظ…ظ† â€œ${product.name}â€‌ = ${product.stock} ظ‚ط·ط¹ط©',
           ),
           backgroundColor: AppTheme.errorColor,
           duration: const Duration(seconds: 2),
@@ -461,7 +462,7 @@ class _PosPageState extends State<PosPage> {
     _keepFocus();
   }
 
-  // تعديل سعر منتج في السلة
+  // طھط¹ط¯ظٹظ„ ط³ط¹ط± ظ…ظ†طھط¬ ظپظٹ ط§ظ„ط³ظ„ط©
   void _editItemPrice(int index) {
     final item = _cart[index];
     final product = item['product'] as ProductModel;
@@ -471,11 +472,11 @@ class _PosPageState extends State<PosPage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('تعديل سعر — ${product.name}', style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+        title: Text('طھط¹ط¯ظٹظ„ ط³ط¹ط± â€” ${product.name}', style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('السعر الأصلي: ${product.price} دينار', style: const TextStyle(color: AppTheme.textSecondary)),
+            Text('ط§ظ„ط³ط¹ط± ط§ظ„ط£طµظ„ظٹ: ${product.price} ط¯ظٹظ†ط§ط±', style: const TextStyle(color: AppTheme.textSecondary)),
             const SizedBox(height: 12),
             TextField(
               controller: priceCtrl,
@@ -484,7 +485,7 @@ class _PosPageState extends State<PosPage> {
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               decoration: const InputDecoration(
-                labelText: 'السعر الجديد',
+                labelText: 'ط§ظ„ط³ط¹ط± ط§ظ„ط¬ط¯ظٹط¯',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.attach_money),
               ),
@@ -497,23 +498,23 @@ class _PosPageState extends State<PosPage> {
               setState(() => _cart[index].remove('custom_price'));
               Navigator.pop(ctx);
             },
-            child: const Text('إعادة الأصلي', style: TextStyle(color: AppTheme.errorColor)),
+            child: const Text('ط¥ط¹ط§ط¯ط© ط§ظ„ط£طµظ„ظٹ', style: TextStyle(color: AppTheme.errorColor)),
           ),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('ط¥ظ„ط؛ط§ط،')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
             onPressed: () {
               final newPrice = int.tryParse(priceCtrl.text.trim());
               if (newPrice == null || newPrice <= 0) {
                 ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('أدخل سعراً صحيحاً'), backgroundColor: AppTheme.errorColor),
+                  const SnackBar(content: Text('ط£ط¯ط®ظ„ ط³ط¹ط±ط§ظ‹ طµط­ظٹط­ط§ظ‹'), backgroundColor: AppTheme.errorColor),
                 );
                 return;
               }
               if (newPrice < product.purchasePrice) {
                 ScaffoldMessenger.of(ctx).showSnackBar(
                   SnackBar(
-                    content: Text('السعر لا يمكن أن يقل عن سعر الشراء '),
+                    content: Text('ط§ظ„ط³ط¹ط± ظ„ط§ ظٹظ…ظƒظ† ط£ظ† ظٹظ‚ظ„ ط¹ظ† ط³ط¹ط± ط§ظ„ط´ط±ط§ط، '),
                     backgroundColor: AppTheme.errorColor,
                   ),
                 );
@@ -522,7 +523,7 @@ class _PosPageState extends State<PosPage> {
               setState(() => _cart[index]['custom_price'] = newPrice);
               Navigator.pop(ctx);
             },
-            child: const Text('تطبيق'),
+            child: const Text('طھط·ط¨ظٹظ‚'),
           ),
         ],
       ),
@@ -539,11 +540,11 @@ class _PosPageState extends State<PosPage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('خصم على — ${product.name}', style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+        title: Text('ط®طµظ… ط¹ظ„ظ‰ â€” ${product.name}', style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('السعر: $currentPrice دينار', style: const TextStyle(color: AppTheme.textSecondary)),
+            Text('ط§ظ„ط³ط¹ط±: $currentPrice ط¯ظٹظ†ط§ط±', style: const TextStyle(color: AppTheme.textSecondary)),
             const SizedBox(height: 12),
             TextField(
               controller: discountCtrl,
@@ -552,7 +553,7 @@ class _PosPageState extends State<PosPage> {
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               decoration: const InputDecoration(
-                labelText: 'مبلغ الخصم (دينار)',
+                labelText: 'ظ…ط¨ظ„ط؛ ط§ظ„ط®طµظ… (ط¯ظٹظ†ط§ط±)',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.discount),
               ),
@@ -565,22 +566,22 @@ class _PosPageState extends State<PosPage> {
               setState(() => _cart[index].remove('item_discount'));
               Navigator.pop(ctx);
             },
-            child: const Text('إزالة الخصم', style: TextStyle(color: AppTheme.errorColor)),
+            child: const Text('ط¥ط²ط§ظ„ط© ط§ظ„ط®طµظ…', style: TextStyle(color: AppTheme.errorColor)),
           ),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('ط¥ظ„ط؛ط§ط،')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
             onPressed: () {
               final discount = int.tryParse(discountCtrl.text.trim()) ?? 0;
               if (discount < 0) {
                 ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('الخصم لا يمكن أن يكون سالباً'), backgroundColor: AppTheme.errorColor),
+                  const SnackBar(content: Text('ط§ظ„ط®طµظ… ظ„ط§ ظٹظ…ظƒظ† ط£ظ† ظٹظƒظˆظ† ط³ط§ظ„ط¨ط§ظ‹'), backgroundColor: AppTheme.errorColor),
                 );
                 return;
               }
               if (discount >= currentPrice) {
                 ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('الخصم لا يمكن أن يساوي أو يتجاوز السعر'), backgroundColor: AppTheme.errorColor),
+                  const SnackBar(content: Text('ط§ظ„ط®طµظ… ظ„ط§ ظٹظ…ظƒظ† ط£ظ† ظٹط³ط§ظˆظٹ ط£ظˆ ظٹطھط¬ط§ظˆط² ط§ظ„ط³ط¹ط±'), backgroundColor: AppTheme.errorColor),
                 );
                 return;
               }
@@ -593,14 +594,14 @@ class _PosPageState extends State<PosPage> {
               });
               Navigator.pop(ctx);
             },
-            child: const Text('تطبيق'),
+            child: const Text('طھط·ط¨ظٹظ‚'),
           ),
         ],
       ),
     ).then((_) => _keepFocus());
   }
 
-  // حوار بيع بالدين: اختيار عميل + إنشاء الدين
+  // ط­ظˆط§ط± ط¨ظٹط¹ ط¨ط§ظ„ط¯ظٹظ†: ط§ط®طھظٹط§ط± ط¹ظ…ظٹظ„ + ط¥ظ†ط´ط§ط، ط§ظ„ط¯ظٹظ†
   Future<void> _showDebtSaleDialog() async {
     if (_cart.isEmpty) return;
 
@@ -631,7 +632,7 @@ class _PosPageState extends State<PosPage> {
               children: [
                 const Icon(Icons.person_add_outlined, color: AppTheme.primaryColor),
                 const SizedBox(width: 8),
-                const Text('بيع بالدين', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('ط¨ظٹط¹ ط¨ط§ظ„ط¯ظٹظ†', style: TextStyle(fontWeight: FontWeight.bold)),
               ],
             ),
             content: SizedBox(
@@ -640,7 +641,7 @@ class _PosPageState extends State<PosPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // المبلغ
+                  // ط§ظ„ظ…ط¨ظ„ط؛
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
@@ -651,24 +652,24 @@ class _PosPageState extends State<PosPage> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('المبلغ المستحق:', style: TextStyle(fontSize: 14)),
-                        Text('$total دينار', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+                        const Text('ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ظ…ط³طھط­ظ‚:', style: TextStyle(fontSize: 14)),
+                        Text('$total ط¯ظٹظ†ط§ط±', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
                       ],
                     ),
                   ),
                   const SizedBox(height: 12),
-                  // التبديل بين عميل موجود / عميل جديد
+                  // ط§ظ„طھط¨ط¯ظٹظ„ ط¨ظٹظ† ط¹ظ…ظٹظ„ ظ…ظˆط¬ظˆط¯ / ط¹ظ…ظٹظ„ ط¬ط¯ظٹط¯
                   Row(
                     children: [
                       ChoiceChip(
-                        label: const Text('عميل موجود', style: TextStyle(fontSize: 12)),
+                        label: const Text('ط¹ظ…ظٹظ„ ظ…ظˆط¬ظˆط¯', style: TextStyle(fontSize: 12)),
                         selected: !useNewCustomer,
                         onSelected: (_) => setDialogState(() => useNewCustomer = false),
                         selectedColor: AppTheme.primaryColor.withOpacity(0.2),
                       ),
                       const SizedBox(width: 8),
                       ChoiceChip(
-                        label: const Text('عميل جديد', style: TextStyle(fontSize: 12)),
+                        label: const Text('ط¹ظ…ظٹظ„ ط¬ط¯ظٹط¯', style: TextStyle(fontSize: 12)),
                         selected: useNewCustomer,
                         onSelected: (_) => setDialogState(() => useNewCustomer = true),
                         selectedColor: AppTheme.primaryColor.withOpacity(0.2),
@@ -677,10 +678,10 @@ class _PosPageState extends State<PosPage> {
                   ),
                   const SizedBox(height: 12),
                   if (!useNewCustomer) ...[
-                    // بحث
+                    // ط¨ط­ط«
                     TextField(
                       decoration: InputDecoration(
-                        hintText: 'بحث بالاسم أو رقم الهاتف...',
+                        hintText: 'ط¨ط­ط« ط¨ط§ظ„ط§ط³ظ… ط£ظˆ ط±ظ‚ظ… ط§ظ„ظ‡ط§طھظپ...',
                         prefixIcon: const Icon(Icons.search, size: 18),
                         isDense: true,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -688,11 +689,11 @@ class _PosPageState extends State<PosPage> {
                       onChanged: (v) => setDialogState(() => searchQuery = v),
                     ),
                     const SizedBox(height: 8),
-                    // قائمة العملاء
+                    // ظ‚ط§ط¦ظ…ط© ط§ظ„ط¹ظ…ظ„ط§ط،
                     if (filteredCustomers.isEmpty)
                       const Padding(
                         padding: EdgeInsets.all(16),
-                        child: Center(child: Text('لا يوجد عملاء', style: TextStyle(color: AppTheme.textSecondary))),
+                        child: Center(child: Text('ظ„ط§ ظٹظˆط¬ط¯ ط¹ظ…ظ„ط§ط،', style: TextStyle(color: AppTheme.textSecondary))),
                       )
                     else
                       SizedBox(
@@ -715,8 +716,8 @@ class _PosPageState extends State<PosPage> {
                                 child: Text(name[0], style: TextStyle(color: isSelected ? Colors.white : AppTheme.textPrimary, fontWeight: FontWeight.bold)),
                               ),
                               title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              subtitle: Text(phone.isNotEmpty ? phone : 'بدون هاتف', style: const TextStyle(fontSize: 11)),
-                              trailing: Text('$remaining د', style: const TextStyle(color: AppTheme.errorColor, fontSize: 12, fontWeight: FontWeight.bold)),
+                              subtitle: Text(phone.isNotEmpty ? phone : 'ط¨ط¯ظˆظ† ظ‡ط§طھظپ', style: const TextStyle(fontSize: 11)),
+                              trailing: Text('$remaining ط¯', style: const TextStyle(color: AppTheme.errorColor, fontSize: 12, fontWeight: FontWeight.bold)),
                               onTap: () => setDialogState(() {
                                 selectedCustomer = name;
                                 selectedPhone = phone;
@@ -726,11 +727,11 @@ class _PosPageState extends State<PosPage> {
                         ),
                       ),
                   ] else ...[
-                    // عميل جديد
+                    // ط¹ظ…ظٹظ„ ط¬ط¯ظٹط¯
                     TextField(
                       controller: newCustomerController,
                       decoration: InputDecoration(
-                        labelText: 'اسم العميل *',
+                        labelText: 'ط§ط³ظ… ط§ظ„ط¹ظ…ظٹظ„ *',
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                         isDense: true,
                       ),
@@ -739,7 +740,7 @@ class _PosPageState extends State<PosPage> {
                     TextField(
                       controller: newPhoneController,
                       decoration: InputDecoration(
-                        labelText: 'رقم الهاتف (اختياري)',
+                        labelText: 'ط±ظ‚ظ… ط§ظ„ظ‡ط§طھظپ (ط§ط®طھظٹط§ط±ظٹ)',
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                         isDense: true,
                       ),
@@ -751,11 +752,11 @@ class _PosPageState extends State<PosPage> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('إلغاء'),
+                child: const Text('ط¥ظ„ط؛ط§ط،'),
               ),
               ElevatedButton.icon(
                 icon: const Icon(Icons.check, size: 18),
-                label: const Text('تأكيد البيع بالدين'),
+                label: const Text('طھط£ظƒظٹط¯ ط§ظ„ط¨ظٹط¹ ط¨ط§ظ„ط¯ظٹظ†'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryColor,
                   foregroundColor: Colors.white,
@@ -765,7 +766,7 @@ class _PosPageState extends State<PosPage> {
                   if (useNewCustomer) {
                     if (newCustomerController.text.trim().isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('أدخل اسم العميل'), backgroundColor: AppTheme.errorColor),
+                        const SnackBar(content: Text('ط£ط¯ط®ظ„ ط§ط³ظ… ط§ظ„ط¹ظ…ظٹظ„'), backgroundColor: AppTheme.errorColor),
                       );
                       return;
                     }
@@ -774,7 +775,7 @@ class _PosPageState extends State<PosPage> {
                   }
                   if (selectedCustomer == null) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('اختر عميل أو أدخل اسم جديد'), backgroundColor: AppTheme.errorColor),
+                      const SnackBar(content: Text('ط§ط®طھط± ط¹ظ…ظٹظ„ ط£ظˆ ط£ط¯ط®ظ„ ط§ط³ظ… ط¬ط¯ظٹط¯'), backgroundColor: AppTheme.errorColor),
                     );
                     return;
                   }
@@ -794,28 +795,28 @@ class _PosPageState extends State<PosPage> {
       return;
   }
 
-    // تنفيذ البيع بالدين
+    // طھظ†ظپظٹط° ط§ظ„ط¨ظٹط¹ ط¨ط§ظ„ط¯ظٹظ†
     try {
       final cartSnapshot = List<Map<String, dynamic>>.from(_cart);
       final saleId = await DatabaseHelper.instance.completeSale(_cart, discountValue: discountVal, customerName: selectedCustomer ?? '');
 
       if (saleId > 0) {
-        // إنشاء الدين مرتبط بالفاتورة
+        // ط¥ظ†ط´ط§ط، ط§ظ„ط¯ظٹظ† ظ…ط±طھط¨ط· ط¨ط§ظ„ظپط§طھظˆط±ط©
         await DatabaseHelper.instance.insertDebt(
           customerName: selectedCustomer!,
           phone: selectedPhone?.isNotEmpty == true ? selectedPhone : null,
           amount: total,
-          note: 'فاتورة #$saleId',
+          note: 'ظپط§طھظˆط±ط© #$saleId',
           saleId: saleId,
         );
 
-        // حفظ العميل في جدول العملاء إذا جديد (insertCustomer يتحقق من التكرار)
+        // ط­ظپط¸ ط§ظ„ط¹ظ…ظٹظ„ ظپظٹ ط¬ط¯ظˆظ„ ط§ظ„ط¹ظ…ظ„ط§ط، ط¥ط°ط§ ط¬ط¯ظٹط¯ (insertCustomer ظٹطھط­ظ‚ظ‚ ظ…ظ† ط§ظ„طھظƒط±ط§ط±)
         await DatabaseHelper.instance.insertCustomer(
           selectedCustomer!,
           phone: selectedPhone ?? '',
         );
 
-        // كسب نقاط الولاء
+        // ظƒط³ط¨ ظ†ظ‚ط§ط· ط§ظ„ظˆظ„ط§ط،
         if (selectedCustomer != null && selectedCustomer!.isNotEmpty) {
           await DatabaseHelper.instance.earnLoyaltyPoints(selectedCustomer!, total);
         }
@@ -835,16 +836,16 @@ class _PosPageState extends State<PosPage> {
             _isDiscountPercent = false;
           });
 
-          // طباعة الفاتورة
+          // ط·ط¨ط§ط¹ط© ط§ظ„ظپط§طھظˆط±ط©
           try {
             await _printInvoice(cartSnapshot, _subtotal, _discountValue, total, 0, 0, saleId: saleId, customerName: selectedCustomer);
           } catch (e, st) {
-            await ErrorLogger.instance.logError(e, st, context: 'طباعة فاتورة دين');
+            await ErrorLogger.instance.logError(e, st, context: 'ط·ط¨ط§ط¹ط© ظپط§طھظˆط±ط© ط¯ظٹظ†');
           }
 
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('تم البيع بالدين ✓ | العميل: $selectedCustomer | المبلغ: $total د'),
+              content: Text('طھظ… ط§ظ„ط¨ظٹط¹ ط¨ط§ظ„ط¯ظٹظ† âœ“ | ط§ظ„ط¹ظ…ظٹظ„: $selectedCustomer | ط§ظ„ظ…ط¨ظ„ط؛: $total ط¯'),
               backgroundColor: AppTheme.primaryColor,
               duration: const Duration(seconds: 4),
             ),
@@ -852,14 +853,14 @@ class _PosPageState extends State<PosPage> {
         }
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('حدث خطأ أثناء إتمام البيع!'), backgroundColor: AppTheme.errorColor),
+          const SnackBar(content: Text('ط­ط¯ط« ط®ط·ط£ ط£ط«ظ†ط§ط، ط¥طھظ…ط§ظ… ط§ظ„ط¨ظٹط¹!'), backgroundColor: AppTheme.errorColor),
         );
       }
     } catch (e, st) {
-      await ErrorLogger.instance.logError(e, st, context: 'بيع بالدين');
+      await ErrorLogger.instance.logError(e, st, context: 'ط¨ظٹط¹ ط¨ط§ظ„ط¯ظٹظ†');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
+          SnackBar(content: Text('ط®ط·ط£: $e'), backgroundColor: AppTheme.errorColor),
         );
       }
     }
@@ -868,7 +869,7 @@ class _PosPageState extends State<PosPage> {
     _keepFocus();
   }
 
-  // حوار الدفع: حساب الفكة + اختيار الطباعة
+  // ط­ظˆط§ط± ط§ظ„ط¯ظپط¹: ط­ط³ط§ط¨ ط§ظ„ظپظƒط© + ط§ط®طھظٹط§ط± ط§ظ„ط·ط¨ط§ط¹ط©
   Future<void> _showPaymentDialog() async {
     if (_cart.isEmpty) return;
 
@@ -887,7 +888,7 @@ class _PosPageState extends State<PosPage> {
     final customerCtrl = TextEditingController();
     List<Map<String, dynamic>> allCustomerData = [];
 
-    // تحميل أسماء وأرقام العملاء
+    // طھط­ظ…ظٹظ„ ط£ط³ظ…ط§ط، ظˆط£ط±ظ‚ط§ظ… ط§ظ„ط¹ظ…ظ„ط§ط،
     final dbCustomers = await DatabaseHelper.instance.getAllCustomers();
     final debtNames = await DatabaseHelper.instance.getDebtCustomerNames();
     final debtPhones = await DatabaseHelper.instance.getDebtCustomerPhones();
@@ -923,26 +924,26 @@ class _PosPageState extends State<PosPage> {
 
           return AlertDialog(
             title: const Text(
-              'إتمام الدفع',
+              'ط¥طھظ…ط§ظ… ط§ظ„ط¯ظپط¹',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // عرض الخصم إذا كان موجوداً
+                // ط¹ط±ط¶ ط§ظ„ط®طµظ… ط¥ط°ط§ ظƒط§ظ† ظ…ظˆط¬ظˆط¯ط§ظ‹
                 if (discountVal > 0) ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        '$subtotal دينار',
+                        '$subtotal ط¯ظٹظ†ط§ط±',
                         style: const TextStyle(
                           color: AppTheme.textSecondary,
                           decoration: TextDecoration.lineThrough,
                         ),
                       ),
                       const Text(
-                        'قبل الخصم:',
+                        'ظ‚ط¨ظ„ ط§ظ„ط®طµظ…:',
                         style: TextStyle(color: AppTheme.textSecondary),
                       ),
                     ],
@@ -951,33 +952,33 @@ class _PosPageState extends State<PosPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        '- $discountVal دينار',
+                        '- $discountVal ط¯ظٹظ†ط§ط±',
                         style: const TextStyle(
                           color: AppTheme.errorColor,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const Text(
-                        'الخصم:',
+                        'ط§ظ„ط®طµظ…:',
                         style: TextStyle(color: AppTheme.errorColor),
                       ),
                     ],
                   ),
                   const Divider(height: 12),
                 ],
-                // المجموع الكلي
+                // ط§ظ„ظ…ط¬ظ…ظˆط¹ ط§ظ„ظƒظ„ظٹ
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text(
-                      'الإجمالي:',
+                      'ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ:',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     Text(
-                      '$total دينار',
+                      '$total ط¯ظٹظ†ط§ط±',
                       style: const TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
@@ -987,7 +988,7 @@ class _PosPageState extends State<PosPage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                // حقل المبلغ المعطى
+                // ط­ظ‚ظ„ ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ظ…ط¹ط·ظ‰
                 TextField(
                   controller: amountController,
                   keyboardType: TextInputType.number,
@@ -998,14 +999,14 @@ class _PosPageState extends State<PosPage> {
                     fontWeight: FontWeight.bold,
                   ),
                   decoration: const InputDecoration(
-                    labelText: 'المبلغ المعطى',
+                    labelText: 'ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ظ…ط¹ط·ظ‰',
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.payments),
                   ),
                   onChanged: (_) => setDialogState(() {}),
                 ),
                 const SizedBox(height: 12),
-                // الباقي (الفكة)
+                // ط§ظ„ط¨ط§ظ‚ظٹ (ط§ظ„ظپظƒط©)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(
@@ -1028,14 +1029,14 @@ class _PosPageState extends State<PosPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text(
-                        'الباقي (الفكة):',
+                        'ط§ظ„ط¨ط§ظ‚ظٹ (ط§ظ„ظپظƒط©):',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       Text(
-                        canConfirm ? '$change دينار' : 'المبلغ غير كافٍ',
+                        canConfirm ? '$change ط¯ظٹظ†ط§ط±' : 'ط§ظ„ظ…ط¨ظ„ط؛ ط؛ظٹط± ظƒط§ظپظچ',
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -1048,7 +1049,7 @@ class _PosPageState extends State<PosPage> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // خيار الطباعة
+                // ط®ظٹط§ط± ط§ظ„ط·ط¨ط§ط¹ط©
                 GestureDetector(
                   onTap: () => setDialogState(() => shouldPrint = !shouldPrint),
                   child: Row(
@@ -1066,13 +1067,13 @@ class _PosPageState extends State<PosPage> {
                       ),
                       const SizedBox(width: 4),
                       const Text(
-                        'طباعة فاتورة',
+                        'ط·ط¨ط§ط¹ط© ظپط§طھظˆط±ط©',
                         style: TextStyle(fontSize: 15),
                       ),
                     ],
                   ),
                 ),
-                // خيار العميل
+                // ط®ظٹط§ط± ط§ظ„ط¹ظ…ظٹظ„
                 GestureDetector(
                   onTap: () => setDialogState(() {
                     isCustomer = !isCustomer;
@@ -1090,7 +1091,7 @@ class _PosPageState extends State<PosPage> {
                       ),
                       const Icon(Icons.person, size: 18, color: AppTheme.textSecondary),
                       const SizedBox(width: 4),
-                      const Text('عميل', style: TextStyle(fontSize: 15)),
+                      const Text('ط¹ظ…ظٹظ„', style: TextStyle(fontSize: 15)),
                     ],
                   ),
                 ),
@@ -1118,8 +1119,8 @@ class _PosPageState extends State<PosPage> {
                         controller: fieldController,
                         focusNode: focusNode,
                         decoration: InputDecoration(
-                          labelText: 'اسم العميل',
-                          hintText: 'ابحث بالاسم أو الجوال...',
+                          labelText: 'ط§ط³ظ… ط§ظ„ط¹ظ…ظٹظ„',
+                          hintText: 'ط§ط¨ط­ط« ط¨ط§ظ„ط§ط³ظ… ط£ظˆ ط§ظ„ط¬ظˆط§ظ„...',
                           border: const OutlineInputBorder(),
                           prefixIcon: const Icon(Icons.person, size: 18),
                           suffixIcon: customerName.isNotEmpty
@@ -1181,7 +1182,7 @@ class _PosPageState extends State<PosPage> {
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
-                        'سيتم إضافة "$customerName" كعميل جديد',
+                        'ط³ظٹطھظ… ط¥ط¶ط§ظپط© "$customerName" ظƒط¹ظ…ظٹظ„ ط¬ط¯ظٹط¯',
                         style: TextStyle(color: AppTheme.warningColor, fontSize: 12),
                       ),
                     ),
@@ -1216,7 +1217,7 @@ class _PosPageState extends State<PosPage> {
                                 ),
                                 SizedBox(width: 4),
                                 Text(
-                                  applyCustomerDiscount ? 'خصم $disc% مطبق ✓' : 'خصم خاص: $disc%',
+                                  applyCustomerDiscount ? 'ط®طµظ… $disc% ظ…ط·ط¨ظ‚ âœ“' : 'ط®طµظ… ط®ط§طµ: $disc%',
                                   style: TextStyle(
                                     color: applyCustomerDiscount ? Colors.white : AppTheme.successColor,
                                     fontWeight: FontWeight.bold,
@@ -1260,7 +1261,7 @@ class _PosPageState extends State<PosPage> {
                                 ),
                                 SizedBox(width: 4),
                                 Text(
-                                  usePointsDiscount ? 'صرف $pts نقطة ✓' : '💰 $pts نقطة متاحة',
+                                  usePointsDiscount ? 'طµط±ظپ $pts ظ†ظ‚ط·ط© âœ“' : 'ًں’° $pts ظ†ظ‚ط·ط© ظ…طھط§ط­ط©',
                                   style: TextStyle(
                                     color: usePointsDiscount ? Colors.white : AppTheme.warningColor,
                                     fontWeight: FontWeight.bold,
@@ -1279,7 +1280,7 @@ class _PosPageState extends State<PosPage> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('إلغاء'),
+                child: const Text('ط¥ظ„ط؛ط§ط،'),
               ),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
@@ -1295,7 +1296,7 @@ class _PosPageState extends State<PosPage> {
                 onPressed: canConfirm ? () => Navigator.pop(ctx, true) : null,
                 icon: const Icon(Icons.check_circle),
                 label: const Text(
-                  'تأكيد الدفع',
+                  'طھط£ظƒظٹط¯ ط§ظ„ط¯ظپط¹',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -1323,12 +1324,12 @@ class _PosPageState extends State<PosPage> {
         customerName: customerName,
       );
 
-      // حفظ العميل الجديد (insertCustomer يتحقق من التكرار بنفسه ويرجع -1)
+      // ط­ظپط¸ ط§ظ„ط¹ظ…ظٹظ„ ط§ظ„ط¬ط¯ظٹط¯ (insertCustomer ظٹطھط­ظ‚ظ‚ ظ…ظ† ط§ظ„طھظƒط±ط§ط± ط¨ظ†ظپط³ظ‡ ظˆظٹط±ط¬ط¹ -1)
       if (customerName.isNotEmpty && saleId > 0) {
         await DatabaseHelper.instance.insertCustomer(customerName, phone: customerPhone);
       }
 
-      // صرف نقاط الولاء
+      // طµط±ظپ ظ†ظ‚ط§ط· ط§ظ„ظˆظ„ط§ط،
       if (usePointsDiscount && customerName.isNotEmpty && saleId > 0 && pointsDiscountAmount > 0) {
         final settings = await DatabaseHelper.instance.getLoyaltySettings();
         final dpp = settings['discount_per_point'] as int;
@@ -1338,7 +1339,7 @@ class _PosPageState extends State<PosPage> {
         }
       }
 
-      // كسب نقاط الولاء
+      // ظƒط³ط¨ ظ†ظ‚ط§ط· ط§ظ„ظˆظ„ط§ط،
       if (customerName.isNotEmpty && saleId > 0) {
         await DatabaseHelper.instance.earnLoyaltyPoints(customerName, total);
       }
@@ -1357,20 +1358,20 @@ class _PosPageState extends State<PosPage> {
           _isDiscountPercent = false;
         });
 
-        // مسح المسودة التلقائية بعد البيع الناجح
+        // ظ…ط³ط­ ط§ظ„ظ…ط³ظˆط¯ط© ط§ظ„طھظ„ظ‚ط§ط¦ظٹط© ط¨ط¹ط¯ ط§ظ„ط¨ظٹط¹ ط§ظ„ظ†ط§ط¬ط­
         if (_autoDraftOrderId != null) {
           await DatabaseHelper.instance.clearAutoDraft(_autoDraftOrderId!);
           _autoDraftOrderId = null;
         }
 
-        // الطباعة منفصلة عن البيع — فشلها لا يعني فشل البيع
+        // ط§ظ„ط·ط¨ط§ط¹ط© ظ…ظ†ظپطµظ„ط© ط¹ظ† ط§ظ„ط¨ظٹط¹ â€” ظپط´ظ„ظ‡ط§ ظ„ط§ ظٹط¹ظ†ظٹ ظپط´ظ„ ط§ظ„ط¨ظٹط¹
         var printFailed = false;
         if (shouldPrint) {
           try {
             await _printInvoice(cartSnapshot, subtotal, discountVal, total, given, changeAmount, saleId: saleId);
           } catch (e, st) {
             printFailed = true;
-            await ErrorLogger.instance.logError(e, st, context: 'طباعة بعد بيع ناجح');
+            await ErrorLogger.instance.logError(e, st, context: 'ط·ط¨ط§ط¹ط© ط¨ط¹ط¯ ط¨ظٹط¹ ظ†ط§ط¬ط­');
           }
         }
 
@@ -1386,12 +1387,12 @@ class _PosPageState extends State<PosPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('تم البيع بنجاح ✓${changeAmount > 0 ? '  |  الباقي: $changeAmount د' : ''}'),
+                  Text('طھظ… ط§ظ„ط¨ظٹط¹ ط¨ظ†ط¬ط§ط­ âœ“${changeAmount > 0 ? '  |  ط§ظ„ط¨ط§ظ‚ظٹ: $changeAmount ط¯' : ''}'),
                   const SizedBox(height: 4),
-                  Text('المتبقي: $remainingStock', style: const TextStyle(fontSize: 12)),
+                  Text('ط§ظ„ظ…طھط¨ظ‚ظٹ: $remainingStock', style: const TextStyle(fontSize: 12)),
                   if (printFailed) ...[
                     const SizedBox(height: 4),
-                    const Text('⚠️ فشلت الطباعة — البيانات محفوظة، أعد الطباعة من الزر العلوي',
+                    const Text('âڑ ï¸ڈ ظپط´ظ„طھ ط§ظ„ط·ط¨ط§ط¹ط© â€” ط§ظ„ط¨ظٹط§ظ†ط§طھ ظ…ط­ظپظˆط¸ط©طŒ ط£ط¹ط¯ ط§ظ„ط·ط¨ط§ط¹ط© ظ…ظ† ط§ظ„ط²ط± ط§ظ„ط¹ظ„ظˆظٹ',
                         style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   ],
                 ],
@@ -1403,21 +1404,21 @@ class _PosPageState extends State<PosPage> {
         }
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('حدث خطأ أثناء إتمام البيع!'), backgroundColor: AppTheme.errorColor),
+          const SnackBar(content: Text('ط­ط¯ط« ط®ط·ط£ ط£ط«ظ†ط§ط، ط¥طھظ…ط§ظ… ط§ظ„ط¨ظٹط¹!'), backgroundColor: AppTheme.errorColor),
         );
       }
     } catch (e, st) {
-      await ErrorLogger.instance.logError(e, st, context: 'إتمام البيع - _showPaymentDialog');
+      await ErrorLogger.instance.logError(e, st, context: 'ط¥طھظ…ط§ظ… ط§ظ„ط¨ظٹط¹ - _showPaymentDialog');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ حادث: $e'), backgroundColor: AppTheme.errorColor, duration: const Duration(seconds: 5)),
+          SnackBar(content: Text('ط®ط·ط£ ط­ط§ط¯ط«: $e'), backgroundColor: AppTheme.errorColor, duration: const Duration(seconds: 5)),
         );
       }
     }
     _keepFocus();
   }
 
-  // طباعة فاتورة البيع — وصل بتصميم جديد ٤ أعمدة
+  // ط·ط¨ط§ط¹ط© ظپط§طھظˆط±ط© ط§ظ„ط¨ظٹط¹ â€” ظˆطµظ„ ط¨طھطµظ…ظٹظ… ط¬ط¯ظٹط¯ ظ¤ ط£ط¹ظ…ط¯ط©
   Future<void> _printInvoice(
     List<Map<String, dynamic>> cart,
     int subtotal,
@@ -1428,10 +1429,10 @@ class _PosPageState extends State<PosPage> {
     {int? saleId, String? customerName}
   ) async {
     final settings = await DatabaseHelper.instance.getAllSettings();
-    final storeName = settings['store_name'] ?? 'أحلى الحلوين';
+    final storeName = settings['store_name'] ?? 'ط£ط­ظ„ظ‰ ط§ظ„ط­ظ„ظˆظٹظ†';
     final storePhone = settings['store_phone'] ?? '';
-    final currency = settings['currency'] ?? 'دينار';
-    final footer = settings['receipt_footer'] ?? 'شكراً لزيارتكم';
+    final currency = settings['currency'] ?? 'ط¯ظٹظ†ط§ط±';
+    final footer = settings['receipt_footer'] ?? 'ط´ظƒط±ط§ظ‹ ظ„ط²ظٹط§ط±طھظƒظ…';
     final qrSvgCache = settings['qr_svg_cache'] ?? '';
     final titleFs =
         double.tryParse(settings['receipt_title_font_size'] ?? '14') ?? 14.0;
@@ -1484,11 +1485,11 @@ class _PosPageState extends State<PosPage> {
         '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}'
         '  ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
-    // عكس ترتيب المواد (الأحدث إضافةً يظهر أعلى)
+    // ط¹ظƒط³ طھط±طھظٹط¨ ط§ظ„ظ…ظˆط§ط¯ (ط§ظ„ط£ط­ط¯ط« ط¥ط¶ط§ظپط©ظ‹ ظٹط¸ظ‡ط± ط£ط¹ظ„ظ‰)
     final reversed = cart.reversed.toList();
     final itemCount = cart.fold<int>(0, (s, i) => s + (i['quantity'] as int));
 
-    // حساب ارتفاع الورقة تلقائياً بناءً على عدد المواد
+    // ط­ط³ط§ط¨ ط§ط±طھظپط§ط¹ ط§ظ„ظˆط±ظ‚ط© طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¨ظ†ط§ط،ظ‹ ط¹ظ„ظ‰ ط¹ط¯ط¯ ط§ظ„ظ…ظˆط§ط¯
     final rowH = bodyFs * 1.5 + 5.0;
     final phoneH = storePhone.isNotEmpty ? 8.0 : 0.0;
     final discountH = discountValue > 0 ? 16.0 : 0.0;
@@ -1527,7 +1528,7 @@ class _PosPageState extends State<PosPage> {
         pw.TextStyle(font: aroFont, fontSize: titleFs - 2);
 
     final solidDiv = pw.Divider(thickness: 0.5, color: PdfColors.black);
-    // فاصل منقط يمتد على كامل عرض الفاتورة
+    // ظپط§طµظ„ ظ…ظ†ظ‚ط· ظٹظ…طھط¯ ط¹ظ„ظ‰ ظƒط§ظ…ظ„ ط¹ط±ط¶ ط§ظ„ظپط§طھظˆط±ط©
     final dottedDiv = pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 2),
       child: pw.Row(
@@ -1542,10 +1543,10 @@ class _PosPageState extends State<PosPage> {
         ),
       ),
     );
-    // فاصل رأسي رفيع بين الأعمدة
+    // ظپط§طµظ„ ط±ط£ط³ظٹ ط±ظپظٹط¹ ط¨ظٹظ† ط§ظ„ط£ط¹ظ…ط¯ط©
     // final vSep = pw.Container(width: 0.4, color: PdfColors.grey500);
 
-    // بناء بنود الفاتورة
+    // ط¨ظ†ط§ط، ط¨ظ†ظˆط¯ ط§ظ„ظپط§طھظˆط±ط©
     final List<pw.Widget> itemWidgets = [];
     for (var i = 0; i < reversed.length; i++) {
       final item = reversed[i];
@@ -1611,7 +1612,7 @@ class _PosPageState extends State<PosPage> {
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             children: [
-              // اسم المحل
+              // ط§ط³ظ… ط§ظ„ظ…ط­ظ„
               pw.Text(
                 storeName,
                 style: titleSt(),
@@ -1625,14 +1626,14 @@ class _PosPageState extends State<PosPage> {
                 ),
               pw.SizedBox(height: 3),
               solidDiv,
-              // التاريخ والوقت
+              // ط§ظ„طھط§ط±ظٹط® ظˆط§ظ„ظˆظ‚طھ
               pw.Text(dtStr, style: body()),
-              // رقم الوصل
+              // ط±ظ‚ظ… ط§ظ„ظˆطµظ„
               if (saleId != null) ...[
                 pw.SizedBox(height: 2),
-                pw.Text('رقم الوصل: R${saleId.toString().padLeft(6, '0')}', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+                pw.Text('ط±ظ‚ظ… ط§ظ„ظˆطµظ„: R${saleId.toString().padLeft(6, '0')}', style: bodyBold(), textDirection: pw.TextDirection.rtl),
               ],
-              // اسم العميل (إذا كان بيع بالدين)
+              // ط§ط³ظ… ط§ظ„ط¹ظ…ظٹظ„ (ط¥ط°ط§ ظƒط§ظ† ط¨ظٹط¹ ط¨ط§ظ„ط¯ظٹظ†)
               if (customerName != null && customerName.isNotEmpty) ...[
                 pw.SizedBox(height: 2),
                 pw.Container(
@@ -1641,18 +1642,18 @@ class _PosPageState extends State<PosPage> {
                     color: PdfColors.pink50,
                     borderRadius: pw.BorderRadius.circular(4),
                   ),
-                  child: pw.Text('العميل: $customerName', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+                  child: pw.Text('ط§ظ„ط¹ظ…ظٹظ„: $customerName', style: bodyBold(), textDirection: pw.TextDirection.rtl),
                 ),
               ],
               solidDiv,
               pw.SizedBox(height: 2),
-              // رأس الجدول (ترتيب RTL: الإجمالي | السعر | العدد | اسم المادة)
+              // ط±ط£ط³ ط§ظ„ط¬ط¯ظˆظ„ (طھط±طھظٹط¨ RTL: ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ | ط§ظ„ط³ط¹ط± | ط§ظ„ط¹ط¯ط¯ | ط§ط³ظ… ط§ظ„ظ…ط§ط¯ط©)
               pw.Row(
                 children: [
                   pw.Expanded(
                     flex: 3,
                     child: pw.Text(
-                      'الإجمالي',
+                      'ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ',
                       style: bodyBold(),
                       textAlign: pw.TextAlign.center,
                     ),
@@ -1661,7 +1662,7 @@ class _PosPageState extends State<PosPage> {
                   pw.Expanded(
                     flex: 3,
                     child: pw.Text(
-                      'السعر',
+                      'ط§ظ„ط³ط¹ط±',
                       style: bodyBold(),
                       textAlign: pw.TextAlign.center,
                     ),
@@ -1670,7 +1671,7 @@ class _PosPageState extends State<PosPage> {
                   pw.Expanded(
                     flex: 2,
                     child: pw.Text(
-                      'العدد',
+                      'ط§ظ„ط¹ط¯ط¯',
                       style: bodyBold(),
                       textAlign: pw.TextAlign.center,
                     ),
@@ -1679,7 +1680,7 @@ class _PosPageState extends State<PosPage> {
                   pw.Expanded(
                     flex: 4,
                     child: pw.Text(
-                      'اسم المادة',
+                      'ط§ط³ظ… ط§ظ„ظ…ط§ط¯ط©',
                       style: bodyBold(),
                       textDirection: pw.TextDirection.rtl,
                       textAlign: pw.TextAlign.center,
@@ -1691,18 +1692,18 @@ class _PosPageState extends State<PosPage> {
                 height: 2,
                 child: pw.Divider(thickness: 0.8, color: PdfColors.black),
               ),
-              // بنود الفاتورة
+              // ط¨ظ†ظˆط¯ ط§ظ„ظپط§طھظˆط±ط©
               ...itemWidgets,
               solidDiv,
               pw.SizedBox(height: 2),
-              // الخصم (إذا كان هناك خصم)
+              // ط§ظ„ط®طµظ… (ط¥ط°ط§ ظƒط§ظ† ظ‡ظ†ط§ظƒ ط®طµظ…)
               if (discountValue > 0) ...[
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text('$subtotal $currency', style: body()),
                     pw.Text(
-                      'المجموع:',
+                      'ط§ظ„ظ…ط¬ظ…ظˆط¹:',
                       style: bodyBold(),
                       textDirection: pw.TextDirection.rtl,
                     ),
@@ -1716,7 +1717,7 @@ class _PosPageState extends State<PosPage> {
                       style: body(),
                     ),
                     pw.Text(
-                      'الخصم:',
+                      'ط§ظ„ط®طµظ…:',
                       style: bodyBold(),
                       textDirection: pw.TextDirection.rtl,
                     ),
@@ -1724,26 +1725,26 @@ class _PosPageState extends State<PosPage> {
                 ),
                 pw.Divider(thickness: 0.5),
               ],
-              // الإجمالي النهائي
+              // ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ†ظ‡ط§ط¦ظٹ
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text('$finalTotal $currency', style: titleSt()),
                   pw.Text(
-                    '${discountValue > 0 ? 'الصافي' : 'الإجمالي'} ($itemCount قطعة):',
+                    '${discountValue > 0 ? 'ط§ظ„طµط§ظپظٹ' : 'ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ'} ($itemCount ظ‚ط·ط¹ط©):',
                     style: subTitleSt(),
                     textDirection: pw.TextDirection.rtl,
                   ),
                 ],
               ),
-              // المدفوع والباقي
+              // ط§ظ„ظ…ط¯ظپظˆط¹ ظˆط§ظ„ط¨ط§ظ‚ظٹ
               if (given > finalTotal) ...[
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text('$given $currency', style: body()),
                     pw.Text(
-                      'المدفوع:',
+                      'ط§ظ„ظ…ط¯ظپظˆط¹:',
                       style: bodyBold(),
                       textDirection: pw.TextDirection.rtl,
                     ),
@@ -1761,7 +1762,7 @@ class _PosPageState extends State<PosPage> {
                       ),
                     ),
                     pw.Text(
-                      'الباقي:',
+                      'ط§ظ„ط¨ط§ظ‚ظٹ:',
                       style: bodyBold(),
                       textDirection: pw.TextDirection.rtl,
                     ),
@@ -1804,7 +1805,7 @@ class _PosPageState extends State<PosPage> {
     });
   }
 
-  // عرض المنتجات ذات المخزون المنخفض
+  // ط¹ط±ط¶ ط§ظ„ظ…ظ†طھط¬ط§طھ ط°ط§طھ ط§ظ„ظ…ط®ط²ظˆظ† ط§ظ„ظ…ظ†ط®ظپط¶
   void _showLowStockDialog() {
     showDialog(
       context: context,
@@ -1814,7 +1815,7 @@ class _PosPageState extends State<PosPage> {
             const Icon(Icons.warning_amber_rounded, color: AppTheme.warningColor),
             const SizedBox(width: 8),
             Text(
-              'المخزون المنخفض (${_lowStockProducts.length})',
+              'ط§ظ„ظ…ط®ط²ظˆظ† ط§ظ„ظ…ظ†ط®ظپط¶ (${_lowStockProducts.length})',
               style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold, fontSize: 16),
             ),
           ],
@@ -1823,7 +1824,7 @@ class _PosPageState extends State<PosPage> {
           width: double.maxFinite,
           height: 400,
           child: _lowStockProducts.isEmpty
-              ? const Center(child: Text('لا توجد منتجات بمخزون منخفض ✓', style: TextStyle(color: AppTheme.successColor, fontWeight: FontWeight.bold)))
+              ? const Center(child: Text('ظ„ط§ طھظˆط¬ط¯ ظ…ظ†طھط¬ط§طھ ط¨ظ…ط®ط²ظˆظ† ظ…ظ†ط®ظپط¶ âœ“', style: TextStyle(color: AppTheme.successColor, fontWeight: FontWeight.bold)))
               : ListView.separated(
                   itemCount: _lowStockProducts.length,
                   separatorBuilder: (_, _) => const Divider(height: 1),
@@ -1856,14 +1857,14 @@ class _PosPageState extends State<PosPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('إغلاق'),
+            child: const Text('ط¥ط؛ظ„ط§ظ‚'),
           ),
         ],
       ),
     );
   }
 
-  // عرض الفواتير المعلقة واستئنافها
+  // ط¹ط±ط¶ ط§ظ„ظپظˆط§طھظٹط± ط§ظ„ظ…ط¹ظ„ظ‚ط© ظˆط§ط³طھط¦ظ†ط§ظپظ‡ط§
   Future<void> _showSuspendedOrders() async {
     final orders = await DatabaseHelper.instance.getSuspendedOrders();
     if (!mounted) return;
@@ -1883,7 +1884,7 @@ class _PosPageState extends State<PosPage> {
             Container(
               padding: const EdgeInsets.all(16),
               child: const Text(
-                'الفواتير المعلقة',
+                'ط§ظ„ظپظˆط§طھظٹط± ط§ظ„ظ…ط¹ظ„ظ‚ط©',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -1893,14 +1894,14 @@ class _PosPageState extends State<PosPage> {
             ),
             Expanded(
               child: orders.isEmpty
-                  ? const Center(child: Text('لا توجد فواتير معلقة'))
+                  ? const Center(child: Text('ظ„ط§ طھظˆط¬ط¯ ظپظˆط§طھظٹط± ظ…ط¹ظ„ظ‚ط©'))
                   : ListView.builder(
                       controller: scrollCtrl,
                       itemCount: orders.length,
                       itemBuilder: (_, i) {
                         final order = orders[i];
                         final orderId = order['id'] as int;
-                        final note = order['note'] as String? ?? 'بدون ملاحظة';
+                        final note = order['note'] as String? ?? 'ط¨ط¯ظˆظ† ظ…ظ„ط§ط­ط¸ط©';
                         final createdAt = (order['created_at'] as String)
                             .substring(0, 16)
                             .replaceAll('T', '  ');
@@ -1936,9 +1937,9 @@ class _PosPageState extends State<PosPage> {
                                         .instance
                                         .getSuspendedOrderDiscount(orderId);
 
-                                    // ─── السلة أولاً ثم الحذف ───
-                                    // لو انقطع التطبيق بعد الإضافة وقبل الحذف:
-                                    // الفاتورة تبقى معلقة (تكرار محتمل أفضل من ضياع)
+                                    // â”€â”€â”€ ط§ظ„ط³ظ„ط© ط£ظˆظ„ط§ظ‹ ط«ظ… ط§ظ„ط­ط°ظپ â”€â”€â”€
+                                    // ظ„ظˆ ط§ظ†ظ‚ط·ط¹ ط§ظ„طھط·ط¨ظٹظ‚ ط¨ط¹ط¯ ط§ظ„ط¥ط¶ط§ظپط© ظˆظ‚ط¨ظ„ ط§ظ„ط­ط°ظپ:
+                                    // ط§ظ„ظپط§طھظˆط±ط© طھط¨ظ‚ظ‰ ظ…ط¹ظ„ظ‚ط© (طھظƒط±ط§ط± ظ…ط­طھظ…ظ„ ط£ظپط¶ظ„ ظ…ظ† ط¶ظٹط§ط¹)
                                     if (ctx.mounted) Navigator.pop(ctx);
                                     setState(() {
                                       _cart.addAll(suspendedCart);
@@ -1954,14 +1955,14 @@ class _PosPageState extends State<PosPage> {
                                         .deleteSuspendedOrder(orderId);
                                     if (!deleted) {
                                       await ErrorLogger.instance.warning(
-                                        'استؤنفت فاتورة لكن فشل حذفها المعلق — قد تتكرر',
+                                        'ط§ط³طھط¤ظ†ظپطھ ظپط§طھظˆط±ط© ظ„ظƒظ† ظپط´ظ„ ط­ط°ظپظ‡ط§ ط§ظ„ظ…ط¹ظ„ظ‚ â€” ظ‚ط¯ طھطھظƒط±ط±',
                                         data: {'order_id': orderId},
                                       );
                                     }
                                     if (missingCount > 0 && mounted) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
-                                          content: Text('تنبيه: $missingCount منتج محذوف تم تجاهله من الفاتورة المعلقة'),
+                                          content: Text('طھظ†ط¨ظٹظ‡: $missingCount ظ…ظ†طھط¬ ظ…ط­ط°ظˆظپ طھظ… طھط¬ط§ظ‡ظ„ظ‡ ظ…ظ† ط§ظ„ظپط§طھظˆط±ط© ط§ظ„ظ…ط¹ظ„ظ‚ط©'),
                                           backgroundColor: AppTheme.warningColor,
                                           duration: const Duration(seconds: 4),
                                         ),
@@ -1971,7 +1972,7 @@ class _PosPageState extends State<PosPage> {
                                     _keepFocus();
                                   },
                                   child: const Text(
-                                    'استئناف',
+                                    'ط§ط³طھط¦ظ†ط§ظپ',
                                     style: TextStyle(
                                       color: AppTheme.successColor,
                                       fontWeight: FontWeight.bold,
@@ -2005,7 +2006,7 @@ class _PosPageState extends State<PosPage> {
     _checkSuspendedOrders();
   }
 
-  // سكانر الكاميرا (على الموبايل فقط)
+  // ط³ظƒط§ظ†ط± ط§ظ„ظƒط§ظ…ظٹط±ط§ (ط¹ظ„ظ‰ ط§ظ„ظ…ظˆط¨ط§ظٹظ„ ظپظ‚ط·)
   Future<void> _openCameraScanner() async {
     bool scanned = false;
     await Navigator.push(
@@ -2013,7 +2014,7 @@ class _PosPageState extends State<PosPage> {
       MaterialPageRoute(
         builder: (ctx) => Scaffold(
           appBar: AppBar(
-            title: const Text('امسح الباركود'),
+            title: const Text('ط§ظ…ط³ط­ ط§ظ„ط¨ط§ط±ظƒظˆط¯'),
             backgroundColor: Colors.black,
             foregroundColor: Colors.white,
           ),
@@ -2035,7 +2036,7 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  // ─── تحميل جميع المنتجات ───
+  // â”€â”€â”€ طھط­ظ…ظٹظ„ ط¬ظ…ظٹط¹ ط§ظ„ظ…ظ†طھط¬ط§طھ â”€â”€â”€
   Future<void> _loadAllProducts() async {
     try {
       final products = await DatabaseHelper.instance.getAllProducts();
@@ -2054,7 +2055,7 @@ class _PosPageState extends State<PosPage> {
     } catch (_) {}
   }
 
-  // ─── حوار الخصم ───
+  // â”€â”€â”€ ط­ظˆط§ط± ط§ظ„ط®طµظ… â”€â”€â”€
   Future<void> _showDiscountDialog() async {
     final ctrl = TextEditingController(
       text: _discountAmount > 0 ? '$_discountAmount' : '',
@@ -2064,14 +2065,14 @@ class _PosPageState extends State<PosPage> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setS) => AlertDialog(
-          title: const Text('خصم على الفاتورة'),
+          title: const Text('ط®طµظ… ط¹ظ„ظ‰ ط§ظ„ظپط§طھظˆط±ط©'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               SegmentedButton<bool>(
                 segments: const [
-                  ButtonSegment(value: false, label: Text('مبلغ ثابت')),
-                  ButtonSegment(value: true, label: Text('نسبة مئوية %')),
+                  ButtonSegment(value: false, label: Text('ظ…ط¨ظ„ط؛ ط«ط§ط¨طھ')),
+                  ButtonSegment(value: true, label: Text('ظ†ط³ط¨ط© ظ…ط¦ظˆظٹط© %')),
                 ],
                 selected: {isPercent},
                 onSelectionChanged: (s) => setS(() => isPercent = s.first),
@@ -2087,9 +2088,9 @@ class _PosPageState extends State<PosPage> {
                   fontWeight: FontWeight.bold,
                 ),
                 decoration: InputDecoration(
-                  labelText: isPercent ? 'نسبة الخصم' : 'مبلغ الخصم',
+                  labelText: isPercent ? 'ظ†ط³ط¨ط© ط§ظ„ط®طµظ…' : 'ظ…ط¨ظ„ط؛ ط§ظ„ط®طµظ…',
                   border: const OutlineInputBorder(),
-                  suffixText: isPercent ? '%' : 'دينار',
+                  suffixText: isPercent ? '%' : 'ط¯ظٹظ†ط§ط±',
                 ),
               ),
             ],
@@ -2104,11 +2105,11 @@ class _PosPageState extends State<PosPage> {
                 });
                 Navigator.pop(ctx);
               },
-              child: const Text('إزالة الخصم'),
+              child: const Text('ط¥ط²ط§ظ„ط© ط§ظ„ط®طµظ…'),
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء'),
+              child: const Text('ط¥ظ„ط؛ط§ط،'),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -2123,7 +2124,7 @@ class _PosPageState extends State<PosPage> {
                 });
                 Navigator.pop(ctx);
               },
-              child: const Text('تطبيق'),
+              child: const Text('طھط·ط¨ظٹظ‚'),
             ),
           ],
         ),
@@ -2133,117 +2134,8 @@ class _PosPageState extends State<PosPage> {
     _keepFocus();
   }
 
-  // ─── حوار البحث عن منتج ───
-  Future<void> _showProductSearchDialog() async {
-    final ctrl = TextEditingController();
-    String query = '';
-    // تحميل كل الباركودات لدعم البحث بالباركودات المتعددة
-    final barcodeMap = await DatabaseHelper.instance.getAllBarcodesByProduct();
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setS) {
-          final filtered = query.isEmpty
-              ? _allProducts
-              : _allProducts.where((p) {
-                  if (p.name.toLowerCase().contains(query.toLowerCase())) {
-                    return true;
-                  }
-                  final barcodes = barcodeMap[p.id] ?? [];
-                  return barcodes.any((bc) => bc.contains(query));
-                }).toList();
-          return AlertDialog(
-            title: const Text('بحث عن منتج'),
-            contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            content: SizedBox(
-              width: 440,
-              height: 380,
-              child: Column(
-                children: [
-                  TextField(
-                    controller: ctrl,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      hintText: 'ابحث بالاسم أو الباركود...',
-                      prefixIcon: Icon(Icons.search),
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    onChanged: (v) => setS(() => query = v),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (_, i) {
-                        final p = filtered[i];
-                        final inCart = _cart
-                            .where(
-                              (c) => (c['product'] as ProductModel).id == p.id,
-                            )
-                            .fold<int>(0, (s, c) => s + (c['quantity'] as int));
-                        final remaining = p.stock - inCart;
-                        return ListTile(
-                          dense: true,
-                          title: Text(
-                            p.name,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Text(
-                            '${p.price} دينار — متبقي: $remaining',
-                          ),
-                          trailing: remaining > 0
-                              ? IconButton(
-                                  icon: const Icon(
-                                    Icons.add_circle,
-                                    color: AppTheme.successColor,
-                                  ),
-                                  onPressed: () {
-                                    setState(() {
-                                      final idx = _cart.indexWhere(
-                                        (c) =>
-                                            (c['product'] as ProductModel).id ==
-                                            p.id,
-                                      );
-                                      if (idx >= 0) {
-                                        _cart[idx]['quantity'] =
-                                            (_cart[idx]['quantity'] as int) + 1;
-                                      } else {
-                                        _cart.add({
-                                          'product': p,
-                                          'quantity': 1,
-                                        });
-                                      }
-                                    });
-                                    setS(() {});
-                                  },
-                                )
-                              : const Icon(
-                                  Icons.remove_circle_outline,
-                                  color: AppTheme.errorColor,
-                                ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('إغلاق'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    ctrl.dispose();
-    _keepFocus();
-  }
 
-  // ─── حساب الإجماليات ───
+  // â”€â”€â”€ ط­ط³ط§ط¨ ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹط§طھ â”€â”€â”€
   int get _subtotal => _cart.fold(0, (s, i) {
     final p = i['product'] as ProductModel;
     final itemPrice = (i['custom_price'] as int?) ?? p.price;
@@ -2261,7 +2153,7 @@ class _PosPageState extends State<PosPage> {
 
   @override
   Widget build(BuildContext context) {
-    final categories = <String>['الكل'];
+    final categories = <String>['ط§ظ„ظƒظ„'];
     for (final p in _allProducts) {
       if (!categories.contains(p.category)) categories.add(p.category);
     }
@@ -2270,7 +2162,7 @@ class _PosPageState extends State<PosPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          'نقطة البيع (الكاشير)',
+          'ظ†ظ‚ط·ط© ط§ظ„ط¨ظٹط¹ (ط§ظ„ظƒط§ط´ظٹط±)',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
@@ -2285,18 +2177,18 @@ class _PosPageState extends State<PosPage> {
                     saleId: _lastPrintSaleId, customerName: _lastPrintCustomerName,
                   );
                 } catch (e, st) {
-                  await ErrorLogger.instance.logError(e, st, context: 'إعادة طباعة آخر فاتورة');
+                  await ErrorLogger.instance.logError(e, st, context: 'ط¥ط¹ط§ط¯ط© ط·ط¨ط§ط¹ط© ط¢ط®ط± ظپط§طھظˆط±ط©');
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('فشلت الطباعة — تأكد من الطابعة: $e'),
+                        content: Text('ظپط´ظ„طھ ط§ظ„ط·ط¨ط§ط¹ط© â€” طھط£ظƒط¯ ظ…ظ† ط§ظ„ط·ط§ط¨ط¹ط©: $e'),
                         backgroundColor: AppTheme.errorColor,
                       ),
                     );
                   }
                 }
               },
-              tooltip: 'طباعة آخر فاتورة',
+              tooltip: 'ط·ط¨ط§ط¹ط© ط¢ط®ط± ظپط§طھظˆط±ط©',
             ),
           IconButton(
             icon: Stack(
@@ -2313,7 +2205,7 @@ class _PosPageState extends State<PosPage> {
               ],
             ),
             onPressed: _showSuspendedOrders,
-            tooltip: 'الفواتير المعلقة',
+            tooltip: 'ط§ظ„ظپظˆط§طھظٹط± ط§ظ„ظ…ط¹ظ„ظ‚ط©',
           ),
           IconButton(
             icon: Stack(
@@ -2336,24 +2228,28 @@ class _PosPageState extends State<PosPage> {
               ],
             ),
             onPressed: _showLowStockDialog,
-            tooltip: 'المخزون المنخفض',
+            tooltip: 'ط§ظ„ظ…ط®ط²ظˆظ† ط§ظ„ظ…ظ†ط®ظپط¶',
           ),
           IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: _showProductSearchDialog,
-            tooltip: 'بحث عن منتج',
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SalesPage(showProfit: false)),
+              );
+            },
+            tooltip: 'ط§ظ„ظپظˆط§طھظٹط± ط§ظ„ظ‚ط¯ظٹظ…ط©',
           ),
           if (!kIsWeb && (Platform.isAndroid || Platform.isIOS))
             IconButton(
               icon: const Icon(Icons.camera_alt),
               onPressed: _openCameraScanner,
-              tooltip: 'مسح بالكاميرا',
+              tooltip: 'ظ…ط³ط­ ط¨ط§ظ„ظƒط§ظ…ظٹط±ط§',
             ),
         ],
       ),
       body: Row(
           children: [
-            // ── الجزء الأيسر: السلة + الدفع ──
+            // â”€â”€ ط§ظ„ط¬ط²ط، ط§ظ„ط£ظٹط³ط±: ط§ظ„ط³ظ„ط© + ط§ظ„ط¯ظپط¹ â”€â”€
             Expanded(
               flex: 1,
               child: GestureDetector(
@@ -2368,7 +2264,7 @@ class _PosPageState extends State<PosPage> {
                   ),
                   child: Column(
                     children: [
-                    // حقل الباركود
+                    // ط­ظ‚ظ„ ط§ظ„ط¨ط§ط±ظƒظˆط¯
                     Padding(
                       padding: const EdgeInsets.all(12.0),
                       child: TextField(
@@ -2376,7 +2272,7 @@ class _PosPageState extends State<PosPage> {
                         focusNode: _barcodeFocusNode,
                         autofocus: true,
                         decoration: InputDecoration(
-                          labelText: 'امسح الباركود...',
+                          labelText: 'ط§ظ…ط³ط­ ط§ظ„ط¨ط§ط±ظƒظˆط¯...',
                           prefixIcon: const Icon(Icons.qr_code_scanner, color: AppTheme.primaryColor, size: 20),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                           filled: true,
@@ -2389,7 +2285,7 @@ class _PosPageState extends State<PosPage> {
                         onSubmitted: _onBarcodeScanned,
                       ),
                     ),
-                    // عنوان السلة
+                    // ط¹ظ†ظˆط§ظ† ط§ظ„ط³ظ„ط©
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       color: AppTheme.primaryColor.withOpacity(0.08),
@@ -2398,7 +2294,7 @@ class _PosPageState extends State<PosPage> {
                           const Icon(Icons.shopping_cart, size: 18, color: AppTheme.primaryColor),
                           const SizedBox(width: 6),
                           Text(
-                            'الفاتورة (${_cart.length} صنف)',
+                            'ط§ظ„ظپط§طھظˆط±ط© (${_cart.length} طµظ†ظپ)',
                             style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
                           ),
                           const Spacer(),
@@ -2410,23 +2306,23 @@ class _PosPageState extends State<PosPage> {
                                   _discountAmount = 0;
                                   _isDiscountPercent = false;
                                 });
-                                // مسح المسودة التلقائية
+                                // ظ…ط³ط­ ط§ظ„ظ…ط³ظˆط¯ط© ط§ظ„طھظ„ظ‚ط§ط¦ظٹط©
                                 if (_autoDraftOrderId != null) {
                                   DatabaseHelper.instance.clearAutoDraft(_autoDraftOrderId!);
                                   _autoDraftOrderId = null;
                                 }
                               },
-                              child: const Text('مسح الكل', style: TextStyle(color: AppTheme.errorColor, fontSize: 12)),
+                              child: const Text('ظ…ط³ط­ ط§ظ„ظƒظ„', style: TextStyle(color: AppTheme.errorColor, fontSize: 12)),
                             ),
                         ],
                       ),
                     ),
-                    // قائمة المنتجات بالسلة
+                    // ظ‚ط§ط¦ظ…ط© ط§ظ„ظ…ظ†طھط¬ط§طھ ط¨ط§ظ„ط³ظ„ط©
                     Expanded(
                       child: _cart.isEmpty
                           ? const Center(
                               child: Text(
-                                'الفاتورة فارغة',
+                                'ط§ظ„ظپط§طھظˆط±ط© ظپط§ط±ط؛ط©',
                                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
                               ),
                             )
@@ -2479,7 +2375,7 @@ class _PosPageState extends State<PosPage> {
                                             GestureDetector(
                                               onTap: () => _editItemPrice(index),
                                               child: Text(
-                                                '$itemPrice د.ع',
+                                                '$itemPrice ط¯.ط¹',
                                                 style: TextStyle(
                                                   color: (item['custom_price'] != null) ? AppTheme.warningColor : AppTheme.primaryColor,
                                                   fontWeight: FontWeight.bold,
@@ -2504,7 +2400,7 @@ class _PosPageState extends State<PosPage> {
                                               GestureDetector(
                                                 onTap: () => _editItemDiscount(index),
                                                 child: Text(
-                                                  '$effectivePrice د.ع',
+                                                  '$effectivePrice ط¯.ط¹',
                                                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.successColor),
                                                 ),
                                               ),
@@ -2522,7 +2418,7 @@ class _PosPageState extends State<PosPage> {
                               },
                             ),
                     ),
-                    // لوحة الدفع السفلية
+                    // ظ„ظˆط­ط© ط§ظ„ط¯ظپط¹ ط§ظ„ط³ظپظ„ظٹط©
                     Container(
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                       decoration: BoxDecoration(
@@ -2538,8 +2434,8 @@ class _PosPageState extends State<PosPage> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('$_discountValue د.ع خصم', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold, fontSize: 12)),
-                                Text('الصافي: $_finalTotal د.ع', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.primaryColor)),
+                                Text('$_discountValue ط¯.ط¹ ط®طµظ…', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                                Text('ط§ظ„طµط§ظپظٹ: $_finalTotal ط¯.ط¹', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.primaryColor)),
                               ],
                             ),
                             const SizedBox(height: 4),
@@ -2548,9 +2444,9 @@ class _PosPageState extends State<PosPage> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('الإجمالي:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                                const Text('ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                                 Text(
-                                  '$_finalTotal د.ع',
+                                  '$_finalTotal ط¯.ط¹',
                                   style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
                                 ),
                               ],
@@ -2572,7 +2468,7 @@ class _PosPageState extends State<PosPage> {
                                     padding: const EdgeInsets.symmetric(vertical: 10),
                                   ),
                                   icon: const Icon(Icons.point_of_sale, size: 18),
-                                  label: const Text('دفع', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                                  label: const Text('ط¯ظپط¹', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                                   onPressed: _cart.isEmpty ? null : _showPaymentDialog,
                                 ),
                               ),
@@ -2586,12 +2482,12 @@ class _PosPageState extends State<PosPage> {
               ),
             ),
             ),
-            // ── الجزء الأيمن: المنتجات على شكل كروت ──
+            // â”€â”€ ط§ظ„ط¬ط²ط، ط§ظ„ط£ظٹظ…ظ†: ط§ظ„ظ…ظ†طھط¬ط§طھ ط¹ظ„ظ‰ ط´ظƒظ„ ظƒط±ظˆطھ â”€â”€
             Expanded(
               flex: 2,
               child: Column(
                 children: [
-                  // فلتر الأقسام
+                  // ظپظ„طھط± ط§ظ„ط£ظ‚ط³ط§ظ…
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     color: AppTheme.surfaceColor,
@@ -2619,10 +2515,10 @@ class _PosPageState extends State<PosPage> {
                       ),
                     ),
                   ),
-                  // شبكة المنتجات
+                  // ط´ط¨ظƒط© ط§ظ„ظ…ظ†طھط¬ط§طھ
                   Expanded(
                     child: filteredProducts.isEmpty
-                        ? const Center(child: Text('لا توجد منتجات', style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)))
+                        ? const Center(child: Text('ظ„ط§ طھظˆط¬ط¯ ظ…ظ†طھط¬ط§طھ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)))
                         : LayoutBuilder(
                             builder: (context, constraints) {
                               final crossCount = constraints.maxWidth > 900 ? 4 : (constraints.maxWidth > 600 ? 3 : 2);
@@ -2676,7 +2572,7 @@ class _PosPageState extends State<PosPage> {
                                             Padding(
                                               padding: const EdgeInsets.only(top: 2),
                                               child: Text(
-                                                [if (p.color.isNotEmpty) p.color, if (p.size.isNotEmpty) p.size].join(' — '),
+                                                [if (p.color.isNotEmpty) p.color, if (p.size.isNotEmpty) p.size].join(' â€” '),
                                                 style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
                                                 textAlign: TextAlign.center,
                                                 maxLines: 1,
@@ -2685,12 +2581,12 @@ class _PosPageState extends State<PosPage> {
                                             ),
                                           const SizedBox(height: 4),
                                           Text(
-                                            '${p.price} د.ع',
+                                            '${p.price} ط¯.ط¹',
                                             style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold, fontSize: 13),
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
-                                            'متوفر: ${p.stock}',
+                                            'ظ…طھظˆظپط±: ${p.stock}',
                                             style: TextStyle(
                                               fontSize: 11,
                                               color: p.stock <= 0 ? AppTheme.errorColor : AppTheme.textSecondary,
@@ -2705,7 +2601,7 @@ class _PosPageState extends State<PosPage> {
                                                 borderRadius: BorderRadius.circular(12),
                                               ),
                                               child: Text(
-                                                'بالسلة: $inCart',
+                                                'ط¨ط§ظ„ط³ظ„ط©: $inCart',
                                                 style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                                               ),
                                             ),
@@ -2728,12 +2624,12 @@ class _PosPageState extends State<PosPage> {
 
 Color _posParseColor(String name) {
   const map = {
-    'أحمر': Colors.red, 'اخضر': Colors.green,
-    'أزرق': Colors.blue, 'اسود': Colors.black, 'أبيض': Colors.white,
-    'اصفر': Colors.yellow, 'برتقالي': Colors.orange, 'بنفسجي': Colors.purple,
-    'وردي': Colors.pink, 'بني': Colors.brown, 'رمادي': Colors.grey,
-    'سماوي': Colors.lightBlue, 'نعناعي': Colors.teal,
-    'ذهبي': Color(0xFFFFD700), 'فضي': Color(0xFFC0C0C0),
+    'ط£ط­ظ…ط±': Colors.red, 'ط§ط®ط¶ط±': Colors.green,
+    'ط£ط²ط±ظ‚': Colors.blue, 'ط§ط³ظˆط¯': Colors.black, 'ط£ط¨ظٹط¶': Colors.white,
+    'ط§طµظپط±': Colors.yellow, 'ط¨ط±طھظ‚ط§ظ„ظٹ': Colors.orange, 'ط¨ظ†ظپط³ط¬ظٹ': Colors.purple,
+    'ظˆط±ط¯ظٹ': Colors.pink, 'ط¨ظ†ظٹ': Colors.brown, 'ط±ظ…ط§ط¯ظٹ': Colors.grey,
+    'ط³ظ…ط§ظˆظٹ': Colors.lightBlue, 'ظ†ط¹ظ†ط§ط¹ظٹ': Colors.teal,
+    'ط°ظ‡ط¨ظٹ': Color(0xFFFFD700), 'ظپط¶ظٹ': Color(0xFFC0C0C0),
   };
   final lower = name.toLowerCase().trim();
   for (final entry in map.entries) {
@@ -2764,11 +2660,11 @@ Widget _qtyBtn(IconData icon, Color color, VoidCallback onTap) {
   }
 }
 
-// مستمع دورة حياة التطبيق — يحفظ السلة تلقائياً عند الخروج
+// ظ…ط³طھظ…ط¹ ط¯ظˆط±ط© ط­ظٹط§ط© ط§ظ„طھط·ط¨ظٹظ‚ â€” ظٹط­ظپط¸ ط§ظ„ط³ظ„ط© طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¹ظ†ط¯ ط§ظ„ط®ط±ظˆط¬
 class _PosLifecycleObserver extends WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // عند الخروج للخلفية أو إيقاف التطبيق، نحفظ السلة
+    // ط¹ظ†ط¯ ط§ظ„ط®ط±ظˆط¬ ظ„ظ„ط®ظ„ظپظٹط© ط£ظˆ ط¥ظٹظ‚ط§ظپ ط§ظ„طھط·ط¨ظٹظ‚طŒ ظ†ط­ظپط¸ ط§ظ„ط³ظ„ط©
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
       _PosPageState.instance?._saveAutoDraft();
     }
