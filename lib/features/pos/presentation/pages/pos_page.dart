@@ -1492,28 +1492,14 @@ class _PosPageState extends State<PosPage> {
     final reversed = cart.reversed.toList();
     final itemCount = cart.fold<int>(0, (s, i) => s + (i['quantity'] as int));
 
-    // حساب ارتفاع الورقة تلقائياً بناءً على عدد المواد
-    final rowH = bodyFs * 1.5 + 5.0;
-    final phoneH = storePhone.isNotEmpty ? 8.0 : 0.0;
-    final discountH = discountValue > 0 ? 16.0 : 0.0;
-    final changeH = given > finalTotal ? 16.0 : 0.0;
-    final qrH = qrSvgCache.isNotEmpty ? 24.0 : 0.0;
-    final pageH =
-        52.0 +
-        phoneH +
-        reversed.length * (rowH + 3.0) +
-        discountH +
-        changeH +
-        qrH +
-        46.0;
-
+    // ارتفاع الصفحات تلقائي — MultiPage يقسم تلقائياً بلا حد للطول
     final pageFormat = PdfPageFormat(
       paperW * PdfPageFormat.mm,
-      pageH * PdfPageFormat.mm,
+      280 * PdfPageFormat.mm,
       marginTop: marginTop * PdfPageFormat.mm,
       marginBottom: marginBottom * PdfPageFormat.mm,
-      marginLeft: marginLeft * PdfPageFormat.mm,
-      marginRight: marginRight * PdfPageFormat.mm,
+      marginLeft: (marginLeft + 4) * PdfPageFormat.mm,
+      marginRight: (marginRight + 4) * PdfPageFormat.mm,
     );
 
     pw.TextStyle body() => pw.TextStyle(font: aroFont, fontSize: bodyFs);
@@ -1606,189 +1592,189 @@ class _PosPageState extends State<PosPage> {
     }
 
     final doc = pw.Document();
-    doc.addPage(
-      pw.Page(
-        pageFormat: pageFormat,
-        textDirection: pw.TextDirection.rtl,
-        build: (context) => pw.Padding(
-          padding: const pw.EdgeInsets.only(right: 4, left: 4),
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              // اسم المحل
-              pw.Text(
-                storeName,
-                style: titleSt(),
-                textDirection: pw.TextDirection.rtl,
-              ),
-              if (storePhone.isNotEmpty)
-                pw.Text(
-                  storePhone,
-                  style: subTitleSt(),
-                  textDirection: pw.TextDirection.rtl,
-                ),
-              pw.SizedBox(height: 3),
-              solidDiv,
-              // التاريخ والوقت
-              pw.Text(dtStr, style: body()),
-              // رقم الوصل
-              if (saleId != null) ...[
-                pw.SizedBox(height: 2),
-                pw.Text('رقم الوصل: R${saleId.toString().padLeft(6, '0')}', style: bodyBold(), textDirection: pw.TextDirection.rtl),
-              ],
-              // اسم العميل (إذا كان بيع بالدين)
-              if (customerName != null && customerName.isNotEmpty) ...[
-                pw.SizedBox(height: 2),
-                pw.Container(
-                  padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.pink50,
-                    borderRadius: pw.BorderRadius.circular(4),
-                  ),
-                  child: pw.Text('العميل: $customerName', style: bodyBold(), textDirection: pw.TextDirection.rtl),
-                ),
-              ],
-              solidDiv,
-              pw.SizedBox(height: 2),
-              // رأس الجدول (ترتيب RTL: اسم المادة | العدد | السعر | الإجمالي)
-              pw.Row(
-                children: [
-                  pw.Expanded(
-                    flex: 4,
-                    child: pw.Text(
-                      'اسم المادة',
-                      style: bodyBold(),
-                      textDirection: pw.TextDirection.rtl,
-                      textAlign: pw.TextAlign.center,
-                    ),
-                  ),
-
-                  pw.Expanded(
-                    flex: 2,
-                    child: pw.Text(
-                      'العدد',
-                      style: bodyBold(),
-                      textAlign: pw.TextAlign.center,
-                    ),
-                  ),
-
-                  pw.Expanded(
-                    flex: 3,
-                    child: pw.Text(
-                      'السعر',
-                      style: bodyBold(),
-                      textAlign: pw.TextAlign.center,
-                    ),
-                  ),
-
-                  pw.Expanded(
-                    flex: 3,
-                    child: pw.Text(
-                      'الإجمالي',
-                      style: bodyBold(),
-                      textAlign: pw.TextAlign.center,
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(
-                height: 2,
-                child: pw.Divider(thickness: 0.8, color: PdfColors.black),
-              ),
-              // بنود الفاتورة
-              ...itemWidgets,
-              solidDiv,
-              pw.SizedBox(height: 2),
-              // الخصم (إذا كان هناك خصم)
-              if (discountValue > 0) ...[
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text('$subtotal $currency', style: body()),
-                    pw.Text(
-                      'المجموع:',
-                      style: bodyBold(),
-                      textDirection: pw.TextDirection.rtl,
-                    ),
-                  ],
-                ),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      '- $discountValue $currency',
-                      style: body(),
-                    ),
-                    pw.Text(
-                      'الخصم:',
-                      style: bodyBold(),
-                      textDirection: pw.TextDirection.rtl,
-                    ),
-                  ],
-                ),
-                pw.Divider(thickness: 0.5),
-              ],
-              // الإجمالي النهائي
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('$finalTotal $currency', style: titleSt()),
-                  pw.Text(
-                    '${discountValue > 0 ? 'الصافي' : 'الإجمالي'} ($itemCount قطعة):',
-                    style: subTitleSt(),
-                    textDirection: pw.TextDirection.rtl,
-                  ),
-                ],
-              ),
-              // المدفوع والباقي
-              if (given > finalTotal) ...[
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text('$given $currency', style: body()),
-                    pw.Text(
-                      'المدفوع:',
-                      style: bodyBold(),
-                      textDirection: pw.TextDirection.rtl,
-                    ),
-                  ],
-                ),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      '$change $currency',
-                      style: pw.TextStyle(
-                        font: aroFont,
-                        fontSize: bodyFs + 1,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                    pw.Text(
-                      'الباقي:',
-                      style: bodyBold(),
-                      textDirection: pw.TextDirection.rtl,
-                    ),
-                  ],
-                ),
-              ],
-              dottedDiv,
-              pw.SizedBox(height: 4),
-              if (qrSvgCache.isNotEmpty) ...[  
-                pw.Center(
-                  child: pw.SvgImage(svg: qrSvgCache, width: 60, height: 60),
-                ),
-                pw.SizedBox(height: 4),
-              ],
-              pw.Text(
-                footer,
-                style: body(),
-                textDirection: pw.TextDirection.rtl,
-                textAlign: pw.TextAlign.center,
-              ),
-            ],
+    // رأس الوصل (صفحة أولى فقط)
+    final headerWidgets = <pw.Widget>[
+      // اسم المحل
+      pw.Center(
+        child: pw.Text(
+          storeName,
+          style: titleSt(),
+          textDirection: pw.TextDirection.rtl,
+        ),
+      ),
+      if (storePhone.isNotEmpty)
+        pw.Center(
+          child: pw.Text(
+            storePhone,
+            style: subTitleSt(),
+            textDirection: pw.TextDirection.rtl,
           ),
         ),
+      pw.SizedBox(height: 3),
+      solidDiv,
+      // التاريخ والوقت
+      pw.Center(child: pw.Text(dtStr, style: body())),
+      // رقم الوصل
+      if (saleId != null) ...[
+        pw.SizedBox(height: 2),
+        pw.Center(
+          child: pw.Text('رقم الوصل: R${saleId.toString().padLeft(6, '0')}',
+              style: bodyBold(), textDirection: pw.TextDirection.rtl),
+        ),
+      ],
+      // اسم العميل (إذا كان بيع بالدين)
+      if (customerName != null && customerName.isNotEmpty) ...[
+        pw.SizedBox(height: 2),
+        pw.Center(
+          child: pw.Container(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.pink50,
+              borderRadius: pw.BorderRadius.circular(4),
+            ),
+            child: pw.Text('العميل: $customerName', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+          ),
+        ),
+      ],
+      solidDiv,
+      pw.SizedBox(height: 2),
+      // رأس الجدول (ترتيب RTL: اسم المادة | العدد | السعر | الإجمالي)
+      pw.Row(
+        children: [
+          pw.Expanded(
+            flex: 4,
+            child: pw.Text(
+              'اسم المادة',
+              style: bodyBold(),
+              textDirection: pw.TextDirection.rtl,
+              textAlign: pw.TextAlign.center,
+            ),
+          ),
+          pw.Expanded(
+            flex: 2,
+            child: pw.Text('العدد', style: bodyBold(), textAlign: pw.TextAlign.center),
+          ),
+          pw.Expanded(
+            flex: 3,
+            child: pw.Text('السعر', style: bodyBold(), textAlign: pw.TextAlign.center),
+          ),
+          pw.Expanded(
+            flex: 3,
+            child: pw.Text('الإجمالي', style: bodyBold(), textAlign: pw.TextAlign.center),
+          ),
+        ],
+      ),
+      pw.SizedBox(
+        height: 2,
+        child: pw.Divider(thickness: 0.8, color: PdfColors.black),
+      ),
+    ];
+
+    // ذيل الوصل (مجموع + دفع + تذييل)
+    final tailWidgets = <pw.Widget>[
+      // الخصم (إذا كان هناك خصم)
+      if (discountValue > 0) ...[
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text('$subtotal $currency', style: body()),
+            pw.Text(
+              'المجموع:',
+              style: bodyBold(),
+              textDirection: pw.TextDirection.rtl,
+            ),
+          ],
+        ),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              '- $discountValue $currency',
+              style: body(),
+            ),
+            pw.Text(
+              'الخصم:',
+              style: bodyBold(),
+              textDirection: pw.TextDirection.rtl,
+            ),
+          ],
+        ),
+        pw.Divider(thickness: 0.5),
+      ],
+      // الإجمالي النهائي
+      pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text('$finalTotal $currency', style: titleSt()),
+          pw.Text(
+            '${discountValue > 0 ? 'الصافي' : 'الإجمالي'} ($itemCount قطعة):',
+            style: subTitleSt(),
+            textDirection: pw.TextDirection.rtl,
+          ),
+        ],
+      ),
+      // المدفوع والباقي
+      if (given > finalTotal) ...[
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text('$given $currency', style: body()),
+            pw.Text(
+              'المدفوع:',
+              style: bodyBold(),
+              textDirection: pw.TextDirection.rtl,
+            ),
+          ],
+        ),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              '$change $currency',
+              style: pw.TextStyle(
+                font: aroFont,
+                fontSize: bodyFs + 1,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.Text(
+              'الباقي:',
+              style: bodyBold(),
+              textDirection: pw.TextDirection.rtl,
+            ),
+          ],
+        ),
+      ],
+      dottedDiv,
+      pw.SizedBox(height: 4),
+      if (qrSvgCache.isNotEmpty) ...[
+        pw.Center(
+          child: pw.SvgImage(svg: qrSvgCache, width: 60, height: 60),
+        ),
+        pw.SizedBox(height: 4),
+      ],
+      pw.Center(
+        child: pw.Text(
+          footer,
+          style: body(),
+          textDirection: pw.TextDirection.rtl,
+          textAlign: pw.TextAlign.center,
+        ),
+      ),
+    ];
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: pageFormat,
+        textDirection: pw.TextDirection.rtl,
+        build: (context) => [
+          ...headerWidgets,
+          // بنود الفاتورة (تتوزع تلقائياً على صفحات بلا حد للطول)
+          ...itemWidgets,
+          solidDiv,
+          pw.SizedBox(height: 2),
+          ...tailWidgets,
+        ],
       ),
     );
 

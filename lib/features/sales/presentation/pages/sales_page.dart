@@ -971,18 +971,13 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
       final itemCount = items.fold<int>(0, (s, i) => s + (i['quantity'] as int? ?? 0));
       final subtotal = items.fold<int>(0, (s, i) => s + (i['unit_price'] as int? ?? 0) * (i['quantity'] as int? ?? 0));
 
-      final phoneH = storePhone.isNotEmpty ? 8.0 : 0.0;
-      final discountH = widget.discountAmount > 0 ? 32.0 : 0.0;
-      final rowH = bodyFs * 1.5 + 5.0;
-      final pageH = 52.0 + phoneH + items.length * (rowH + 3.0) + discountH + 46.0;
-
       final pageFormat = PdfPageFormat(
         paperW * PdfPageFormat.mm,
-        pageH * PdfPageFormat.mm,
+        280 * PdfPageFormat.mm,
         marginTop: marginTop * PdfPageFormat.mm,
         marginBottom: marginBottom * PdfPageFormat.mm,
-        marginLeft: marginLeft * PdfPageFormat.mm,
-        marginRight: marginRight * PdfPageFormat.mm,
+        marginLeft: (marginLeft + 4) * PdfPageFormat.mm,
+        marginRight: (marginRight + 4) * PdfPageFormat.mm,
       );
 
       // بناء بنود الفاتورة
@@ -1021,78 +1016,86 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
       }
 
       final doc = pw.Document();
+      // رأس الوصل (صفحة أولى فقط)
+      final headerWidgets = <pw.Widget>[
+        pw.Center(child: pw.Text(storeName, style: titleSt(), textDirection: pw.TextDirection.rtl)),
+        if (storePhone.isNotEmpty)
+          pw.Center(child: pw.Text(storePhone, style: subTitleSt(), textDirection: pw.TextDirection.rtl)),
+        pw.SizedBox(height: 3),
+        solidDiv,
+        // التاريخ والوقت
+        pw.Center(child: pw.Text(widget.time, style: body())),
+        // رقم الوصل
+        pw.SizedBox(height: 2),
+        pw.Center(
+          child: pw.Text('رقم الوصل: R${widget.saleId.toString().padLeft(6, '0')}',
+              style: bodyBold(), textDirection: pw.TextDirection.rtl),
+        ),
+        solidDiv,
+        pw.SizedBox(height: 2),
+        // رأس الجدول (ترتيب RTL: اسم المادة | العدد | السعر | الإجمالي)
+        pw.Row(
+          children: [
+            pw.Expanded(flex: 4, child: pw.Text('اسم المادة', style: bodyBold(), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center)),
+            pw.Expanded(flex: 2, child: pw.Text('العدد', style: bodyBold(), textAlign: pw.TextAlign.center)),
+            pw.Expanded(flex: 3, child: pw.Text('السعر', style: bodyBold(), textAlign: pw.TextAlign.center)),
+            pw.Expanded(flex: 3, child: pw.Text('الإجمالي', style: bodyBold(), textAlign: pw.TextAlign.center)),
+          ],
+        ),
+        pw.SizedBox(height: 2, child: pw.Divider(thickness: 0.8, color: PdfColors.black)),
+      ];
+
+      // ذيل الوصل (مجموع + تذييل)
+      final tailWidgets = <pw.Widget>[
+        // الخصم
+        if (widget.discountAmount > 0) ...[
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('$subtotal $currency', style: body()),
+              pw.Text('المجموع:', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+            ],
+          ),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('- ${widget.discountAmount} $currency', style: body()),
+              pw.Text('الخصم:', style: bodyBold(), textDirection: pw.TextDirection.rtl),
+            ],
+          ),
+          pw.Divider(thickness: 0.5),
+        ],
+        // الإجمالي النهائي
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text('${widget.totalAmount} $currency', style: titleSt()),
+            pw.Text(
+              '${widget.discountAmount > 0 ? 'الصافي' : 'الإجمالي'} ($itemCount قطعة):',
+              style: subTitleSt(),
+              textDirection: pw.TextDirection.rtl,
+            ),
+          ],
+        ),
+        dottedDiv,
+        pw.SizedBox(height: 4),
+        pw.Center(
+          child: pw.Text(footer, style: body(), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center),
+        ),
+      ];
+
       doc.addPage(
-        pw.Page(
+        pw.MultiPage(
           pageFormat: pageFormat,
           textDirection: pw.TextDirection.rtl,
-          build: (ctx) => pw.Padding(
-            padding: const pw.EdgeInsets.only(right: 4, left: 4),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.center,
-              children: [
-                // اسم المحل
-                pw.Text(storeName, style: titleSt(), textDirection: pw.TextDirection.rtl),
-                if (storePhone.isNotEmpty)
-                  pw.Text(storePhone, style: subTitleSt(), textDirection: pw.TextDirection.rtl),
-                pw.SizedBox(height: 3),
-                solidDiv,
-                // التاريخ والوقت
-                pw.Text(widget.time, style: body()),
-                // رقم الوصل
-                pw.SizedBox(height: 2),
-                pw.Text('رقم الوصل: R${widget.saleId.toString().padLeft(6, '0')}', style: bodyBold(), textDirection: pw.TextDirection.rtl),
-                solidDiv,
-                pw.SizedBox(height: 2),
-                // رأس الجدول (ترتيب RTL: اسم المادة | العدد | السعر | الإجمالي)
-                pw.Row(
-                  children: [
-                    pw.Expanded(flex: 4, child: pw.Text('اسم المادة', style: bodyBold(), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center)),
-                    pw.Expanded(flex: 2, child: pw.Text('العدد', style: bodyBold(), textAlign: pw.TextAlign.center)),
-                    pw.Expanded(flex: 3, child: pw.Text('السعر', style: bodyBold(), textAlign: pw.TextAlign.center)),
-                    pw.Expanded(flex: 3, child: pw.Text('الإجمالي', style: bodyBold(), textAlign: pw.TextAlign.center)),
-                  ],
-                ),
-                pw.SizedBox(height: 2, child: pw.Divider(thickness: 0.8, color: PdfColors.black)),
-                // بنود الفاتورة
-                ...itemWidgets,
-                solidDiv,
-                pw.SizedBox(height: 2),
-                // الخصم
-                if (widget.discountAmount > 0) ...[
-                  pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text('$subtotal $currency', style: body()),
-                      pw.Text('المجموع:', style: bodyBold(), textDirection: pw.TextDirection.rtl),
-                    ],
-                  ),
-                  pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text('- ${widget.discountAmount} $currency', style: body()),
-                      pw.Text('الخصم:', style: bodyBold(), textDirection: pw.TextDirection.rtl),
-                    ],
-                  ),
-                  pw.Divider(thickness: 0.5),
-                ],
-                // الإجمالي النهائي
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text('${widget.totalAmount} $currency', style: titleSt()),
-                    pw.Text(
-                      '${widget.discountAmount > 0 ? 'الصافي' : 'الإجمالي'} ($itemCount قطعة):',
-                      style: subTitleSt(),
-                      textDirection: pw.TextDirection.rtl,
-                    ),
-                  ],
-                ),
-                dottedDiv,
-                pw.SizedBox(height: 4),
-                pw.Text(footer, style: body(), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center),
-              ],
-            ),
-          ),
+          build: (ctx) => [
+            ...headerWidgets,
+            // بنود الفاتورة (تتوزع تلقائياً على صفحات بلا حد للطول)
+            ...itemWidgets,
+            solidDiv,
+            pw.SizedBox(height: 2),
+            ...tailWidgets,
+          ],
         ),
       );
 
