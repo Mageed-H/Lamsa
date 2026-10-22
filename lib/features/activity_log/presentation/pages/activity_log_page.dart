@@ -29,6 +29,7 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
     ('sale', 'الفواتير'),
     ('expense', 'المصروفات'),
     ('debt', 'ديون المحل'),
+    ('note', 'الملاحظات'),
     ('setting', 'الإعدادات'),
   ];
 

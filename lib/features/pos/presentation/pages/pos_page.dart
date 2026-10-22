@@ -61,6 +61,8 @@ class _PosPageState extends State<PosPage> {
   String _posSearchQuery = '';
   // معرّف المسودة التلقائية الحالية
   int? _autoDraftOrderId;
+  // هل توجد ملاحظات اليوم (للنقطة على الأيقونة)
+  bool _hasNotesToday = false;
 
   @override
   void initState() {
@@ -77,6 +79,7 @@ class _PosPageState extends State<PosPage> {
       _checkSuspendedOrders();
       _loadAllProducts();
       _restoreAutoDraft();
+      _refreshNotesToday();
     });
   }
 
@@ -1864,6 +1867,200 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
+  // ─── الملاحظات: ملاحظات سريعة عن الزبائن والطلبات ───
+
+  void _refreshNotesToday() async {
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final db = await DatabaseHelper.instance.database;
+    try {
+      final rows = await db.rawQuery(
+        "SELECT COUNT(*) FROM cashier_notes WHERE created_at LIKE ?",
+        ['$today%'],
+      );
+      if (mounted) {
+        setState(() => _hasNotesToday = ((rows.first.values.first as int?) ?? 0) > 0);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _showNotesSheet() async {
+    final addCtrl = TextEditingController();
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        List<Map<String, dynamic>> notes = <Map<String, dynamic>>[];
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            Future<void> load() async {
+              final list = await DatabaseHelper.instance.getCashierNotes();
+              setSheetState(() => notes = list);
+              _refreshNotesToday();
+            }
+            load();
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              child: SizedBox(
+                height: MediaQuery.of(ctx).size.height * 0.62,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.sticky_note_2_outlined, color: AppTheme.primaryColor),
+                          const SizedBox(width: 8),
+                          const Text('الملاحظات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const Spacer(),
+                          IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                        ],
+                      ),
+                    ),
+                    // إضافة ملاحظة جديدة
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: addCtrl,
+                              textInputAction: TextInputAction.done,
+                              decoration: const InputDecoration(
+                                hintText: 'مثال: زبون طلب عطر X بالاسم، راجعه بكرة',
+                                isDense: true,
+                                border: OutlineInputBorder(),
+                              ),
+                              onSubmitted: (v) async {
+                                if (v.trim().isEmpty) return;
+                                await DatabaseHelper.instance.insertCashierNote(v.trim());
+                                addCtrl.clear();
+                                await load();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.add_circle, color: AppTheme.primaryColor, size: 32),
+                            onPressed: () async {
+                              if (addCtrl.text.trim().isEmpty) return;
+                              await DatabaseHelper.instance.insertCashierNote(addCtrl.text.trim());
+                              addCtrl.clear();
+                              await load();
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: notes.isEmpty
+                          ? const Center(
+                              child: Text('لا توجد ملاحظات بعد', style: TextStyle(color: AppTheme.textSecondary)),
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              itemCount: notes.length,
+                              itemBuilder: (ctx, i) => _noteTile(notes[i], load),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (mounted) _refreshNotesToday();
+  }
+
+  Widget _noteTile(Map<String, dynamic> note, Future<void> Function() refresh) {
+    final createdAt = DateTime.tryParse(note['created_at'] as String? ?? '');
+    final timeStr = createdAt != null
+        ? '${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}'
+        : '';
+    final updatedAt = note['updated_at'] as String?;
+    final edited = updatedAt != null && updatedAt.isNotEmpty;
+    return ListTile(
+      dense: true,
+      leading: const Icon(Icons.notes, color: AppTheme.primaryColor, size: 20),
+      title: Text(
+        note['note'] as String? ?? '',
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+      ),
+      subtitle: Text(
+        edited ? 'الساعة $timeStr (معدلة)' : 'الساعة $timeStr',
+        style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.edit, size: 18, color: AppTheme.primaryColor),
+            tooltip: 'تعديل',
+            onPressed: () => _editNoteDialog(Map<String, dynamic>.from(note), refresh),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete, size: 18, color: AppTheme.errorColor),
+            tooltip: 'حذف',
+            onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (dCtx) => AlertDialog(
+                  title: const Text('حذف الملاحظة؟', style: TextStyle(color: AppTheme.errorColor)),
+                  content: Text(note['note'] as String? ?? ''),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('إلغاء')),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor, foregroundColor: Colors.white),
+                      onPressed: () => Navigator.pop(dCtx, true),
+                      child: const Text('حذف'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed == true) {
+                await DatabaseHelper.instance.deleteCashierNote(note['id'] as int);
+                await refresh();
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editNoteDialog(Map<String, dynamic> note, Future<void> Function() refresh) async {
+    final ctrl = TextEditingController(text: note['note'] as String? ?? '');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('تعديل الملاحظة', style: TextStyle(color: AppTheme.primaryColor)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+    if (saved == true && ctrl.text.trim().isNotEmpty) {
+      await DatabaseHelper.instance.updateCashierNote(note['id'] as int, ctrl.text.trim());
+      await refresh();
+    }
+  }
+
   // عرض الفواتير المعلقة واستئنافها
   Future<void> _showSuspendedOrders() async {
     final orders = await DatabaseHelper.instance.getSuspendedOrders();
@@ -2236,6 +2433,26 @@ class _PosPageState extends State<PosPage> {
               if (mounted) _keepFocus();
             },
             tooltip: 'بحث في الفواتير',
+          ),
+          IconButton(
+            icon: Stack(
+              children: [
+                const Icon(Icons.sticky_note_2_outlined),
+                if (_hasNotesToday)
+                  Positioned(
+                    right: 0, top: 0,
+                    child: Container(
+                      width: 10, height: 10,
+                      decoration: const BoxDecoration(color: AppTheme.warningColor, shape: BoxShape.circle),
+                    ),
+                  ),
+              ],
+            ),
+            onPressed: () async {
+              await _showNotesSheet();
+              if (mounted) _keepFocus();
+            },
+            tooltip: 'الملاحظات',
           ),
           if (!kIsWeb && (Platform.isAndroid || Platform.isIOS))
             IconButton(

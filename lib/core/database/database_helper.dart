@@ -80,7 +80,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 20, // الإصدار 20: سجل التعديلات الشامل (activity_log) مع الاسترجاع
+      version: 21, // الإصدار 21: ملاحظات الكاشير (cashier_notes)
       onConfigure: _onConfigure, // مفتاح التشفير + العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -455,6 +455,7 @@ class DatabaseHelper {
     await _createV18Tables(db);
     await _createV19Tables(db);
     await _createV20Tables(db);
+    await _createV21Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -524,6 +525,24 @@ class DatabaseHelper {
     if (oldVersion < 20) {
       await _createV20Tables(db);
     }
+    if (oldVersion < 21) {
+      await _createV21Tables(db);
+    }
+  }
+
+  // ==========================================================
+  // ملاحظات الكاشير (v21) — ملاحظات سريعة للزبائن والطلبات
+  // ==========================================================
+  Future _createV21Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cashier_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_cn_date ON cashier_notes (created_at);');
   }
 
   // ==========================================================
@@ -707,6 +726,21 @@ class DatabaseHelper {
                 }
               }
               break;
+            case 'note':
+              if (entityId != null) {
+                if (action == 'delete' && dataJson != null) {
+                  final data = jsonDecode(dataJson) as Map<String, dynamic>;
+                  final existing = await txn.query('cashier_notes', where: 'id = ?', whereArgs: [entityId], limit: 1);
+                  if (existing.isEmpty) {
+                    await txn.insert('cashier_notes', data);
+                    applied = true;
+                  }
+                } else if (action == 'edit' && oldValue != null) {
+                  await txn.update('cashier_notes', {'note': oldValue, 'updated_at': null}, where: 'id = ?', whereArgs: [entityId]);
+                  applied = true;
+                }
+              }
+              break;
             case 'setting':
               if (field != null) {
                 await txn.insert('settings', {'key': field, 'value': oldValue ?? ''},
@@ -763,6 +797,86 @@ class DatabaseHelper {
       _notifyAll();
     }
     return restored;
+  }
+
+  // ==========================================================
+  // ملاحظات الكاشير — CRUD مع تسجيل في سجل التعديلات الشامل
+  // ==========================================================
+
+  /// جلب الملاحظات (الأحدث أولاً)
+  Future<List<Map<String, dynamic>>> getCashierNotes({int limit = 200}) async {
+    try {
+      final db = await instance.database;
+      return await db.query('cashier_notes', orderBy: 'id DESC', limit: limit);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<int> insertCashierNote(String note) async {
+    try {
+      final db = await instance.database;
+      final now = DateTime.now().toIso8601String();
+      final id = await db.insert('cashier_notes', {'note': note, 'created_at': now});
+      if (id > 0) {
+        await logActivity(action: 'add', entity: 'note', entityId: id, entityName: 'ملاحظة', newValue: note);
+      }
+      return id;
+    } catch (e) {
+      return -1;
+    }
+  }
+
+  Future<bool> updateCashierNote(int id, String note) async {
+    try {
+      final db = await instance.database;
+      final oldRows = await db.query('cashier_notes', where: 'id = ?', whereArgs: [id], limit: 1);
+      if (oldRows.isEmpty) return false;
+      final oldNote = oldRows.first['note'] as String? ?? '';
+      if (oldNote == note) return true;
+      final rows = await db.update('cashier_notes', {
+        'note': note,
+        'updated_at': DateTime.now().toIso8601String(),
+      }, where: 'id = ?', whereArgs: [id]);
+      if (rows > 0) {
+        await logActivity(
+          action: 'edit',
+          entity: 'note',
+          entityId: id,
+          entityName: 'ملاحظة',
+          field: 'note',
+          oldValue: oldNote,
+          newValue: note,
+          undoable: true,
+        );
+      }
+      return rows > 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> deleteCashierNote(int id) async {
+    try {
+      final db = await instance.database;
+      final oldRows = await db.query('cashier_notes', where: 'id = ?', whereArgs: [id], limit: 1);
+      final rows = await db.delete('cashier_notes', where: 'id = ?', whereArgs: [id]);
+      if (rows > 0 && oldRows.isNotEmpty) {
+        await logActivity(
+          action: 'delete',
+          entity: 'note',
+          entityId: id,
+          entityName: 'ملاحظة',
+          oldValue: '${oldRows.first['note'] ?? ''}',
+          newValue: 'حذف',
+          dataJson: jsonEncode(oldRows.first),
+          undoable: true,
+        );
+      }
+      return rows > 0;
+    } catch (e) {
+      return false;
+    }
   }
 
   Future _createV4Tables(Database db) async {
