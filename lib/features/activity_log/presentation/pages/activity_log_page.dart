@@ -27,8 +27,10 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
     ('category', 'الأقسام'),
     ('customer', 'الزبائن'),
     ('sale', 'الفواتير'),
+    ('customer_debt', 'ديون الزبائن'),
     ('expense', 'المصروفات'),
     ('debt', 'ديون المحل'),
+    ('barcode', 'الباركودات'),
     ('note', 'الملاحظات'),
     ('setting', 'الإعدادات'),
   ];

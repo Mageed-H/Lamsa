@@ -777,6 +777,127 @@ class DatabaseHelper {
               if (action == 'debt_add' && entityId != null && oldValue != null) {
                 await txn.update('shop_debts', {'amount': int.tryParse(oldValue) ?? 0}, where: 'id = ?', whereArgs: [entityId]);
                 applied = true;
+              } else if (entityId != null) {
+                if (action == 'delete' && dataJson != null) {
+                  final data = jsonDecode(dataJson) as Map<String, dynamic>;
+                  final existing = await txn.query('shop_debts', where: 'id = ?', whereArgs: [entityId], limit: 1);
+                  if (existing.isEmpty) {
+                    await txn.insert('shop_debts', data);
+                    applied = true;
+                  }
+                } else if (action == 'edit' && field != null && oldValue != null) {
+                  const allowed = ['supplier_name', 'phone', 'amount', 'paid', 'note'];
+                  if (allowed.contains(field)) {
+                    dynamic val = oldValue;
+                    if (field == 'amount' || field == 'paid') val = int.tryParse(oldValue) ?? 0;
+                    await txn.update('shop_debts', {field: val}, where: 'id = ?', whereArgs: [entityId]);
+                    applied = true;
+                  }
+                }
+              }
+              break;
+            case 'customer_debt':
+              if (entityId != null) {
+                if (action == 'delete' && dataJson != null) {
+                  final data = jsonDecode(dataJson) as Map<String, dynamic>;
+                  final existing = await txn.query('debts', where: 'id = ?', whereArgs: [entityId], limit: 1);
+                  if (existing.isEmpty) {
+                    await txn.insert('debts', data);
+                    applied = true;
+                  }
+                } else if (action == 'edit' && field != null && oldValue != null) {
+                  const allowed = ['customer_name', 'phone', 'amount', 'paid', 'note'];
+                  if (allowed.contains(field)) {
+                    dynamic val = oldValue;
+                    if (field == 'amount' || field == 'paid') val = int.tryParse(oldValue) ?? 0;
+                    await txn.update('debts', {field: val}, where: 'id = ?', whereArgs: [entityId]);
+                    applied = true;
+                  }
+                }
+              }
+              break;
+            case 'barcode':
+              if (action == 'edit' && entityId != null && oldValue != null) {
+                await txn.update('product_barcodes', {'barcode': oldValue}, where: 'id = ?', whereArgs: [entityId]);
+                applied = true;
+              } else if (action == 'delete' && dataJson != null) {
+                final data = jsonDecode(dataJson) as Map<String, dynamic>;
+                final exists = await txn.query('product_barcodes',
+                    where: 'product_id = ? AND barcode = ?',
+                    whereArgs: [data['product_id'], data['barcode']], limit: 1);
+                if (exists.isEmpty) {
+                  await txn.insert('product_barcodes', data);
+                  applied = true;
+                }
+              } else if (action == 'add' && dataJson != null) {
+                // استرجاع الإضافة = إزالة الباركود المضاف
+                final data = jsonDecode(dataJson) as Map<String, dynamic>;
+                await txn.delete('product_barcodes',
+                    where: 'product_id = ? AND barcode = ?',
+                    whereArgs: [data['product_id'], data['barcode']]);
+                applied = true;
+              }
+              break;
+            case 'sale':
+              // استرجاع إرجاع فاتورة: إعادة بناء الفاتورة من اللقطة
+              if (action == 'return' && dataJson != null) {
+                final data = jsonDecode(dataJson) as Map<String, dynamic>;
+                final sale = data['sale'] as Map<String, dynamic>?;
+                final rawItems = (data['items'] as List?) ?? const [];
+                if (sale == null || rawItems.isEmpty) break;
+                final saleId = sale['id'];
+
+                // فحص المخزون — إذا ما كافي ما نطبق شي (نرجع بلا تغيير)
+                final needed = <int, int>{};
+                for (final raw in rawItems) {
+                  final it = raw as Map<String, dynamic>;
+                  final pid = it['product_id'] as int;
+                  needed[pid] = (needed[pid] ?? 0) + (it['quantity'] as int);
+                }
+                bool stockOk = true;
+                for (final need in needed.entries) {
+                  final stockRows = await txn.query('products', where: 'id = ?', whereArgs: [need.key], limit: 1);
+                  if (stockRows.isEmpty) {
+                    stockOk = false;
+                    break;
+                  }
+                  final stock = (stockRows.first['stock'] as int?) ?? 0;
+                  if (stock < need.value) {
+                    stockOk = false;
+                    break;
+                  }
+                }
+                if (!stockOk) break;
+
+                final existingRows = await txn.query('sales', where: 'id = ?', whereArgs: [saleId], limit: 1);
+                final saleExists = existingRows.isNotEmpty;
+                if (!saleExists) {
+                  // الفاتورة انحذفت — نعيدها كما كانت باللقطة
+                  await txn.insert('sales', sale, conflictAlgorithm: ConflictAlgorithm.replace);
+                }
+                int amountAdd = 0;
+                int countAdd = 0;
+                int profitAdd = 0;
+                for (final raw in rawItems) {
+                  final it = Map<String, dynamic>.from(raw);
+                  await txn.insert('sale_items', it, conflictAlgorithm: ConflictAlgorithm.replace);
+                  final qty = it['quantity'] as int;
+                  await txn.rawUpdate('UPDATE products SET stock = stock - ? WHERE id = ?', [qty, it['product_id']]);
+                  amountAdd += (it['unit_price'] as int) * qty;
+                  countAdd += qty;
+                  profitAdd += ((it['unit_price'] as int) - ((it['purchase_price'] as int?) ?? 0)) * qty;
+                }
+                if (saleExists) {
+                  // فاتورة موجودة (إرجاع جزئي) — نرفع المبلغ والعدد والربح
+                  await txn.rawUpdate('''
+                    UPDATE sales SET
+                      total_amount = total_amount + ?,
+                      total_profit = MAX(0, total_profit + ?),
+                      items_count = items_count + ?
+                    WHERE id = ?
+                  ''', [amountAdd, profitAdd, countAdd, saleId]);
+                }
+                applied = true;
               }
               break;
           }
@@ -946,10 +1067,25 @@ class DatabaseHelper {
   Future<int> addBarcode(int productId, String barcode) async {
     try {
       final db = await instance.database;
-      return await db.insert('product_barcodes', {
+      final prodRows = await db.query('products', columns: ['name'], where: 'id = ?', whereArgs: [productId], limit: 1);
+      final prodName = prodRows.isEmpty ? '' : (prodRows.first['name'] as String? ?? '');
+      final id = await db.insert('product_barcodes', {
         'product_id': productId,
         'barcode': barcode,
       }, conflictAlgorithm: ConflictAlgorithm.fail);
+      if (id > 0) {
+        await logActivity(
+          action: 'add',
+          entity: 'barcode',
+          entityId: productId,
+          entityName: prodName,
+          oldValue: 'إضافة باركود',
+          newValue: barcode,
+          dataJson: jsonEncode({'product_id': productId, 'barcode': barcode}),
+          undoable: true,
+        );
+      }
+      return id;
     } catch (e) {
       print('Error adding barcode: $e');
       return -1;
@@ -959,8 +1095,27 @@ class DatabaseHelper {
   Future<int> updateBarcode(int barcodeId, String newBarcode) async {
     try {
       final db = await instance.database;
-      return await db.update('product_barcodes', {'barcode': newBarcode},
+      final oldRows = await db.query('product_barcodes', where: 'id = ?', whereArgs: [barcodeId], limit: 1);
+      if (oldRows.isEmpty) return 0;
+      final oldBarcode = oldRows.first['barcode'] as String? ?? '';
+      final prodRows = await db.query('products', columns: ['name'],
+          where: 'id = ?', whereArgs: [oldRows.first['product_id']], limit: 1);
+      final prodName = prodRows.isEmpty ? '' : (prodRows.first['name'] as String? ?? '');
+      final rows = await db.update('product_barcodes', {'barcode': newBarcode},
           where: 'id = ?', whereArgs: [barcodeId]);
+      if (rows > 0 && oldBarcode != newBarcode) {
+        await logActivity(
+          action: 'edit',
+          entity: 'barcode',
+          entityId: barcodeId,
+          entityName: prodName,
+          field: 'barcode',
+          oldValue: oldBarcode,
+          newValue: newBarcode,
+          undoable: true,
+        );
+      }
+      return rows;
     } catch (e) {
       print('Error updating barcode: $e');
       return -1;
@@ -970,8 +1125,25 @@ class DatabaseHelper {
   Future<int> removeBarcode(int barcodeId) async {
     try {
       final db = await instance.database;
-      return await db.delete('product_barcodes',
-          where: 'id = ?', whereArgs: [barcodeId]);
+      final oldRows = await db.query('product_barcodes', where: 'id = ?', whereArgs: [barcodeId], limit: 1);
+      if (oldRows.isEmpty) return 0;
+      final prodRows = await db.query('products', columns: ['name'],
+          where: 'id = ?', whereArgs: [oldRows.first['product_id']], limit: 1);
+      final prodName = prodRows.isEmpty ? '' : (prodRows.first['name'] as String? ?? '');
+      final rows = await db.delete('product_barcodes', where: 'id = ?', whereArgs: [barcodeId]);
+      if (rows > 0) {
+        await logActivity(
+          action: 'delete',
+          entity: 'barcode',
+          entityId: barcodeId,
+          entityName: prodName,
+          oldValue: '${oldRows.first['barcode'] ?? ''}',
+          newValue: 'حذف باركود',
+          dataJson: jsonEncode(oldRows.first),
+          undoable: true,
+        );
+      }
+      return rows;
     } catch (e) {
       return 0;
     }
@@ -2536,14 +2708,20 @@ class DatabaseHelper {
   Future<bool> returnSale(int saleId) async {
     try {
       final db = await instance.database;
-      String saleInfo = '';
+      String entityName = '';
+      String details = '';
+      Map<String, dynamic>? logData;
       await db.transaction((txn) async {
         final saleRows = await txn.query('sales', where: 'id = ?', whereArgs: [saleId], limit: 1);
-        if (saleRows.isNotEmpty) {
-          final s = saleRows.first;
-          saleInfo = '${s['receipt_number'] ?? 'R$saleId'} — ${s['total_amount']} د.ع';
-        }
-        final items = await txn.query('sale_items', where: 'sale_id = ?', whereArgs: [saleId]);
+        if (saleRows.isEmpty) return;
+        final sale = saleRows.first;
+        entityName = '${sale['receipt_number'] ?? 'R$saleId'}';
+        final items = await txn.query('sale_items', where: 'sale_id = ?', whereArgs: [saleId], orderBy: 'id ASC');
+        details = 'إرجاع كامل — ${sale['total_amount']} د.ع (${items.length} صنف)';
+        logData = {
+          'sale': sale,
+          'items': items,
+        };
         for (final item in items) {
           final productId = item['product_id'] as int;
           final qty = item['quantity'] as int;
@@ -2552,14 +2730,16 @@ class DatabaseHelper {
         await txn.delete('sale_items', where: 'sale_id = ?', whereArgs: [saleId]);
         await txn.delete('sales', where: 'id = ?', whereArgs: [saleId]);
       });
-      if (saleInfo.isNotEmpty) {
+      if (logData != null) {
         await logActivity(
           action: 'return',
           entity: 'sale',
           entityId: saleId,
-          entityName: saleInfo,
-          oldValue: saleInfo,
-          newValue: 'إرجاع كامل',
+          entityName: entityName,
+          oldValue: 'إرجاع كامل',
+          newValue: '$details | ${itemSummaryShort(logData!['items'] as List)}',
+          dataJson: jsonEncode(logData),
+          undoable: true,
         );
       }
       salesRevision.value++;
@@ -2572,17 +2752,45 @@ class DatabaseHelper {
     }
   }
 
+  /// ملخص قصير لبنود الإرجاع (للعرض في السجل)
+  static String itemSummaryShort(List items) {
+    final parts = <String>[];
+    for (final it in items) {
+      final nm = (it as Map)['product_name'] as String? ?? '';
+      final qty = it['quantity'] as int? ?? 0;
+      if (parts.length >= 4) break;
+      parts.add('$nm ×$qty');
+    }
+    if (items.length > parts.length) parts.add('+${items.length - parts.length} أصناف');
+    return 'بنود الإرجاع: ${parts.join('، ')}';
+  }
+
   /// إرجاع جزئي: returnQtys = {sale_item_id: qty_to_return}
   /// يرجع المخزون ويعدّل الفاتورة (أو يحذفها إذا رجعت كلها)
   Future<bool> partialReturnSale(int saleId, Map<int, int> returnQtys) async {
     if (returnQtys.isEmpty) return false;
     try {
       final db = await instance.database;
+      String entityName = '';
       String summary = '';
+      Map<String, dynamic>? logData;
       await db.transaction((txn) async {
         int returnedAmount = 0;
         int returnedProfit = 0;
         int returnedCount = 0;
+
+        // لقطة الفاتورة قبل التعديل (احتياط إذا انحذفت بالكامل)
+        final saleRows = await txn.query('sales', where: 'id = ?', whereArgs: [saleId], limit: 1);
+        final saleSnapshot = saleRows.isEmpty ? null : saleRows.first;
+        if (saleSnapshot != null) entityName = '${saleSnapshot['receipt_number'] ?? 'R$saleId'}';
+
+        // عدّاد جديد لكل بند (لنستطيع استرجاعه لاحقاً)
+        int newItemId = -1;
+        final nextItemIdRows = await txn.rawQuery('SELECT COALESCE(MAX(id), 0) + 1 as next FROM sale_items');
+        final nextItemId = (nextItemIdRows.first['next'] as int?) ?? 1;
+        newItemId = nextItemId;
+
+        final returnedPieces = <Map<String, dynamic>>[];
 
         for (final entry in returnQtys.entries) {
           final itemId = entry.key;
@@ -2613,6 +2821,17 @@ class DatabaseHelper {
                 where: 'id = ?', whereArgs: [itemId]);
           }
 
+          // بند الإرجاع (بمعرّف محجوز للاسترجاع)
+          returnedPieces.add({
+            'id': newItemId,
+            'sale_id': saleId,
+            'product_id': productId,
+            'product_name': row['product_name'],
+            'quantity': actualReturn,
+            'unit_price': unitPrice,
+            'purchase_price': purchasePrice,
+          });
+          newItemId++;
           returnedAmount += unitPrice * actualReturn;
           returnedProfit += (unitPrice - purchasePrice) * actualReturn;
           returnedCount += actualReturn;
@@ -2632,15 +2851,27 @@ class DatabaseHelper {
             WHERE id = ?
           ''', [returnedAmount, returnedProfit, returnedCount, saleId]);
         }
-        summary = 'إرجاع جزئي — $returnedAmount د.ع / $returnedCount قطعة';
+        if (saleSnapshot != null) {
+          summary = 'إرجاع جزئي — $returnedAmount د.ع / $returnedCount قطعة (${returnedPieces.length} صنف)';
+          logData = {
+            'sale': saleSnapshot,
+            'items': returnedPieces,
+            'returned_amount': returnedAmount,
+            'returned_count': returnedCount,
+            'sale_was_deleted': remainingItems.isEmpty ? 1 : 0,
+          };
+        }
       });
-      if (summary.isNotEmpty) {
+      if (logData != null) {
         await logActivity(
           action: 'return',
           entity: 'sale',
           entityId: saleId,
-          entityName: 'R$saleId',
-          newValue: summary,
+          entityName: entityName,
+          oldValue: 'إرجاع جزئي',
+          newValue: '$summary | ${itemSummaryShort(logData!['items'] as List)}',
+          dataJson: jsonEncode(logData),
+          undoable: true,
         );
       }
       salesRevision.value++;
@@ -2824,7 +3055,16 @@ class DatabaseHelper {
         'created_at': now,
         'updated_at': now,
       });
-      if (id > 0) { debtsRevision.value++; _notifyAll(); }
+      if (id > 0) {
+        await logActivity(
+          action: 'add',
+          entity: 'customer_debt',
+          entityId: id,
+          entityName: customerName.trim(),
+          newValue: 'دين $amount د.ع${(note?.trim().isNotEmpty ?? false) ? ' — ${note!.trim()}' : ''}',
+        );
+        debtsRevision.value++; _notifyAll();
+      }
       return id;
     } catch (e) {
       print('Error inserting debt: $e');
@@ -2947,6 +3187,21 @@ class DatabaseHelper {
           'amount': payAmount,
           'created_at': DateTime.now().toIso8601String(),
         });
+
+        // سجل التعديلات الشامل — استرجاع الدفع يعيد المبلغ المدفوع القديم
+        await txn.insert('activity_log', {
+          'action': 'edit',
+          'entity': 'customer_debt',
+          'entity_id': debtId,
+          'entity_name': '${rows.first['customer_name'] ?? ''}',
+          'field': 'paid',
+          'old_value': '$currentPaid',
+          'new_value': '$newPaid (دفعة $payAmount)',
+          'is_bulk': 0,
+          'undoable': 1,
+          'undone': 0,
+          'created_at': DateTime.now().toIso8601String(),
+        });
       });
       debtsRevision.value++;
       _notifyAll();
@@ -2967,6 +3222,8 @@ class DatabaseHelper {
   }) async {
     try {
       final db = await instance.database;
+      // جلب القيم القديمة لتسجيل التغييرات
+      final oldRows = await db.query('debts', where: 'id = ?', whereArgs: [debtId], limit: 1);
       final updates = <String, dynamic>{
         'updated_at': DateTime.now().toIso8601String(),
       };
@@ -2976,7 +3233,27 @@ class DatabaseHelper {
       if (paid != null) updates['paid'] = paid;
       if (note != null) updates['note'] = note.trim();
 
-      await db.update('debts', updates, where: 'id = ?', whereArgs: [debtId]);
+      final rows = await db.update('debts', updates, where: 'id = ?', whereArgs: [debtId]);
+      if (rows > 0 && oldRows.isNotEmpty) {
+        final oldMap = oldRows.first;
+        for (final entry in updates.entries) {
+          if (entry.key == 'updated_at') continue;
+          final oldVal = '${oldMap[entry.key] ?? ''}';
+          final newVal = '${entry.value}';
+          if (oldVal != newVal) {
+            await logActivity(
+              action: 'edit',
+              entity: 'customer_debt',
+              entityId: debtId,
+              entityName: '${oldMap['customer_name'] ?? ''}',
+              field: entry.key,
+              oldValue: oldVal,
+              newValue: newVal,
+              undoable: true,
+            );
+          }
+        }
+      }
       debtsRevision.value++;
       _notifyAll();
       return true;
@@ -2990,7 +3267,20 @@ class DatabaseHelper {
   Future<bool> deleteDebt(int debtId) async {
     try {
       final db = await instance.database;
-      await db.delete('debts', where: 'id = ?', whereArgs: [debtId]);
+      final oldRows = await db.query('debts', where: 'id = ?', whereArgs: [debtId], limit: 1);
+      final rows = await db.delete('debts', where: 'id = ?', whereArgs: [debtId]);
+      if (rows > 0 && oldRows.isNotEmpty) {
+        await logActivity(
+          action: 'delete',
+          entity: 'customer_debt',
+          entityId: debtId,
+          entityName: '${oldRows.first['customer_name'] ?? ''}',
+          oldValue: '${oldRows.first['amount'] ?? 0} د.ع (مدفوع ${oldRows.first['paid'] ?? 0})',
+          newValue: 'حذف',
+          dataJson: jsonEncode(oldRows.first),
+          undoable: true,
+        );
+      }
       debtsRevision.value++;
       _notifyAll();
       return true;
@@ -3078,6 +3368,17 @@ class DatabaseHelper {
             'amount': amount,
             'created_at': now,
           });
+          await txn.insert('activity_log', {
+            'action': 'add',
+            'entity': 'debt',
+            'entity_id': id,
+            'entity_name': supplierName.trim(),
+            'new_value': 'دين جديد $amount د.ع${(note?.trim().isNotEmpty ?? false) ? ' — ${note!.trim()}' : ''}',
+            'is_bulk': 0,
+            'undoable': 0,
+            'undone': 0,
+            'created_at': now,
+          });
           debtsRevision.value++;
           _notifyAll();
         }
@@ -3116,6 +3417,20 @@ class DatabaseHelper {
           'amount': payAmount,
           'created_at': DateTime.now().toIso8601String(),
         });
+        // سجل التعديلات الشامل — استرجاع الدفع يعيد المبلغ المدفوع القديم
+        await txn.insert('activity_log', {
+          'action': 'edit',
+          'entity': 'debt',
+          'entity_id': debtId,
+          'entity_name': '${rows.first['supplier_name'] ?? ''}',
+          'field': 'paid',
+          'old_value': '$currentPaid',
+          'new_value': '$newPaid (دفعة $payAmount)',
+          'is_bulk': 0,
+          'undoable': 1,
+          'undone': 0,
+          'created_at': DateTime.now().toIso8601String(),
+        });
       });
       debtsRevision.value++;
       _notifyAll();
@@ -3139,12 +3454,34 @@ class DatabaseHelper {
   Future<bool> updateShopDebt(int debtId, {String? supplierName, String? phone, int? amount, String? note}) async {
     try {
       final db = await instance.database;
+      // جلب القيم القديمة لتسجيل التغييرات
+      final oldRows = await db.query('shop_debts', where: 'id = ?', whereArgs: [debtId], limit: 1);
       final updates = <String, dynamic>{'updated_at': DateTime.now().toIso8601String()};
       if (supplierName != null) updates['supplier_name'] = supplierName.trim();
       if (phone != null) updates['phone'] = phone.trim();
       if (amount != null) updates['amount'] = amount;
       if (note != null) updates['note'] = note.trim();
-      await db.update('shop_debts', updates, where: 'id = ?', whereArgs: [debtId]);
+      final rows = await db.update('shop_debts', updates, where: 'id = ?', whereArgs: [debtId]);
+      if (rows > 0 && oldRows.isNotEmpty) {
+        final oldMap = oldRows.first;
+        for (final entry in updates.entries) {
+          if (entry.key == 'updated_at') continue;
+          final oldVal = '${oldMap[entry.key] ?? ''}';
+          final newVal = '${entry.value}';
+          if (oldVal != newVal) {
+            await logActivity(
+              action: 'edit',
+              entity: 'debt',
+              entityId: debtId,
+              entityName: '${oldMap['supplier_name'] ?? ''}',
+              field: entry.key,
+              oldValue: oldVal,
+              newValue: newVal,
+              undoable: true,
+            );
+          }
+        }
+      }
       debtsRevision.value++;
       _notifyAll();
       return true;
@@ -3157,7 +3494,20 @@ class DatabaseHelper {
   Future<bool> deleteShopDebt(int debtId) async {
     try {
       final db = await instance.database;
-      await db.delete('shop_debts', where: 'id = ?', whereArgs: [debtId]);
+      final oldRows = await db.query('shop_debts', where: 'id = ?', whereArgs: [debtId], limit: 1);
+      final rows = await db.delete('shop_debts', where: 'id = ?', whereArgs: [debtId]);
+      if (rows > 0 && oldRows.isNotEmpty) {
+        await logActivity(
+          action: 'delete',
+          entity: 'debt',
+          entityId: debtId,
+          entityName: '${oldRows.first['supplier_name'] ?? ''}',
+          oldValue: '${oldRows.first['amount'] ?? 0} د.ع (مدفوع ${oldRows.first['paid'] ?? 0})',
+          newValue: 'حذف',
+          dataJson: jsonEncode(oldRows.first),
+          undoable: true,
+        );
+      }
       debtsRevision.value++;
       _notifyAll();
       return true;
