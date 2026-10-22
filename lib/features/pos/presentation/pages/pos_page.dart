@@ -809,6 +809,12 @@ class _PosPageState extends State<PosPage> {
           saleId: saleId,
         );
 
+        // حفظ العميل في جدول العملاء إذا جديد (insertCustomer يتحقق من التكرار)
+        await DatabaseHelper.instance.insertCustomer(
+          selectedCustomer!,
+          phone: selectedPhone ?? '',
+        );
+
         // كسب نقاط الولاء
         if (selectedCustomer != null && selectedCustomer!.isNotEmpty) {
           await DatabaseHelper.instance.earnLoyaltyPoints(selectedCustomer!, total);
@@ -1317,8 +1323,8 @@ class _PosPageState extends State<PosPage> {
         customerName: customerName,
       );
 
-      // حفظ العميل الجديد إذا لم يكن موجوداً
-      if (customerName.isNotEmpty && saleId > 0 && !allCustomerData.any((c) => c['name'] == customerName)) {
+      // حفظ العميل الجديد (insertCustomer يتحقق من التكرار بنفسه ويرجع -1)
+      if (customerName.isNotEmpty && saleId > 0) {
         await DatabaseHelper.instance.insertCustomer(customerName, phone: customerPhone);
       }
 
