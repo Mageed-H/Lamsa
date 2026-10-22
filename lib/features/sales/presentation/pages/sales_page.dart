@@ -33,6 +33,7 @@ class _SalesPageState extends State<SalesPage> {
   DateTime? _selectedMonth;
   DateTimeRange? _selectedRange;
   String _receiptSearchQuery = '';
+  String _productSearchQuery = '';
 
   @override
   void initState() {
@@ -84,8 +85,11 @@ class _SalesPageState extends State<SalesPage> {
     setState(() => _isLoading = true);
     final summary = await DatabaseHelper.instance.getSalesSummary();
     List<Map<String, dynamic>> sales;
-    if (_receiptSearchQuery.isNotEmpty) {
-      sales = await DatabaseHelper.instance.searchSalesByReceipt(_receiptSearchQuery);
+    if (_receiptSearchQuery.trim().isNotEmpty || _productSearchQuery.trim().isNotEmpty) {
+      sales = await DatabaseHelper.instance.searchSalesByProduct(
+        _productSearchQuery.trim(),
+        receiptQuery: _receiptSearchQuery.trim(),
+      );
     } else {
       final range = _getDateRange(_activeFilter);
       sales = await DatabaseHelper.instance.getSalesByDateRange(range.$1, range.$2);
@@ -429,31 +433,63 @@ class _SalesPageState extends State<SalesPage> {
                     color: AppTheme.successColor,
                   ),
                   const SizedBox(height: 20),
-                  // حقل البحث برقم الوصل
+                  // حقول البحث: رقم الوصل + اسم المنتج
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: TextField(
-                      decoration: InputDecoration(
-                        hintText: 'بحث برقم الوصل...',
-                        prefixIcon: const Icon(Icons.receipt_long, color: AppTheme.primaryColor, size: 20),
-                        suffixIcon: _receiptSearchQuery.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear, size: 18),
-                                onPressed: () {
-                                  setState(() => _receiptSearchQuery = '');
-                                  _loadData();
-                                },
-                              )
-                            : null,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        filled: true,
-                        fillColor: Colors.white,
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      ),
-                      style: const TextStyle(fontSize: 13),
-                      onChanged: (val) => setState(() => _receiptSearchQuery = val),
-                      onSubmitted: (_) => _loadData(),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            decoration: InputDecoration(
+                              hintText: 'بحث برقم الوصل...',
+                              prefixIcon: const Icon(Icons.receipt_long, color: AppTheme.primaryColor, size: 20),
+                              suffixIcon: _receiptSearchQuery.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear, size: 18),
+                                      onPressed: () {
+                                        setState(() => _receiptSearchQuery = '');
+                                        _loadData();
+                                      },
+                                    )
+                                  : null,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              filled: true,
+                              fillColor: Colors.white,
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            ),
+                            style: const TextStyle(fontSize: 13),
+                            onChanged: (val) => setState(() => _receiptSearchQuery = val),
+                            onSubmitted: (_) => _loadData(),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            decoration: InputDecoration(
+                              hintText: 'بحث باسم المنتج / الباركود / اللون...',
+                              prefixIcon: const Icon(Icons.search, color: AppTheme.primaryColor, size: 20),
+                              suffixIcon: _productSearchQuery.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear, size: 18),
+                                      onPressed: () {
+                                        setState(() => _productSearchQuery = '');
+                                        _loadData();
+                                      },
+                                    )
+                                  : null,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              filled: true,
+                              fillColor: Colors.white,
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            ),
+                            style: const TextStyle(fontSize: 13),
+                            onChanged: (val) => setState(() => _productSearchQuery = val),
+                            onSubmitted: (_) => _loadData(),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 12),

@@ -1462,6 +1462,26 @@ class DatabaseHelper {
     }
   }
 
+  /// بحث الفواتير حسب المنتج: اسم المنتج / الباركود / اللون / القياس
+  /// مع فلترة اختيارية برقم الوصل (فارغة = تتجاهل)
+  Future<List<Map<String, dynamic>>> searchSalesByProduct(String query, {String receiptQuery = ''}) async {
+    try {
+      final db = await instance.database;
+      final like = '%$query%';
+      final receiptLike = '%$receiptQuery%';
+      return await db.rawQuery('''
+        SELECT DISTINCT s.* FROM sales s
+        JOIN sale_items si ON si.sale_id = s.id
+        LEFT JOIN products p ON p.id = si.product_id
+        WHERE (si.product_name LIKE ? OR p.name LIKE ? OR p.barcode LIKE ? OR p.color LIKE ? OR p.size LIKE ?)
+          AND (? = '%%' OR s.receipt_number LIKE ?)
+        ORDER BY s.created_at DESC
+      ''', [like, like, like, like, like, receiptLike, receiptLike]);
+    } catch (e) {
+      return [];
+    }
+  }
+
   /// ربط عميل بفاتورة موجودة
   Future<bool> assignCustomerToSale(int saleId, String customerName) async {
     try {
