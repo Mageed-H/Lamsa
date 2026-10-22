@@ -14,6 +14,13 @@ import 'package:cashier_system/features/activity_log/presentation/pages/activity
 import 'package:cashier_system/features/products/data/models/product_model.dart';
 import 'package:cashier_system/features/products/presentation/widgets/barcode_printer_widget.dart';
 
+// ─── رقم فعيلة مقروء للعملية الجماعية (يظهر في سجل التعديلات) ───
+String _newBulkGroupLabel() {
+  final now = DateTime.now();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return 'دفعة ${two(now.day)}/${two(now.month)} - ${two(now.hour)}:${two(now.minute)}:${two(now.second)}';
+}
+
 // ─── قائمة اختيار القسم مع بحث (مشتركة بين جميع الأماكن) ───
 Future<String?> showCategoryPicker(BuildContext context, List<String> categories, {String? selected}) async {
   final searchCtrl = TextEditingController();
@@ -2708,7 +2715,7 @@ trailing: _isSelectionMode
         ),
       );
       if (confirmed != true || !mounted) return;
-      final group = 'bulk${DateTime.now().microsecondsSinceEpoch}';
+      final group = _newBulkGroupLabel();
       int deleted = 0;
       for (final id in _selectedProductIds) {
         final success = await DatabaseHelper.instance.deleteProductWithLog(
@@ -2759,7 +2766,7 @@ trailing: _isSelectionMode
         ),
       );
       if (confirmed == null || confirmed.isEmpty || !mounted) return;
-      final group = 'bulk${DateTime.now().microsecondsSinceEpoch}';
+      final group = _newBulkGroupLabel();
       final db = await DatabaseHelper.instance.database;
       await db.transaction((txn) async {
         for (final id in _selectedProductIds) {
@@ -2819,7 +2826,7 @@ trailing: _isSelectionMode
       );
       colorCtrl.dispose();
       if (confirmed == null || confirmed.isEmpty || !mounted) return;
-      final group = 'bulk${DateTime.now().microsecondsSinceEpoch}';
+      final group = _newBulkGroupLabel();
       final db = await DatabaseHelper.instance.database;
       await db.transaction((txn) async {
         for (final id in _selectedProductIds) {
@@ -2887,7 +2894,7 @@ trailing: _isSelectionMode
       );
       if (confirmed != true || !mounted) return;
       try {
-        final group = 'bulk${DateTime.now().microsecondsSinceEpoch}';
+        final group = _newBulkGroupLabel();
         final db = await DatabaseHelper.instance.database;
         await db.transaction((txn) async {
           for (final id in _selectedProductIds) {
@@ -2988,7 +2995,7 @@ trailing: _isSelectionMode
     if (confirmed != true || !mounted) return;
 
     try {
-      final group = 'bulk${DateTime.now().microsecondsSinceEpoch}';
+      final group = _newBulkGroupLabel();
       final db = await DatabaseHelper.instance.database;
       await db.transaction((txn) async {
         for (final id in _selectedProductIds) {

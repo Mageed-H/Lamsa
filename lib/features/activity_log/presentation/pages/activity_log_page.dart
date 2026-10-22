@@ -143,40 +143,108 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
     _loadLogs();
   }
 
+  /// استرجاع فعيلة جماعية: الكل أو تحديد جزء منها
   Future<void> _restoreGroup(String group) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('استرجاع الفعيلة كاملة؟', style: TextStyle(color: AppTheme.primaryColor)),
-        content: const Text('سيتم التراجع عن كل التغييرات التي تمت في هذه العملية الجماعية دفعة واحدة.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('استرجاع الكل'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
     // جلب كل السجلات غير المسترجعة من هذه الفعيلة
     final db = await DatabaseHelper.instance.database;
     final rows = await db.query('activity_log',
         where: 'bulk_group = ? AND undone = 0', whereArgs: [group], orderBy: 'id ASC');
-    final ids = rows.map((r) => r['id'] as int).toList();
     if (!mounted) return;
-    if (ids.isEmpty) {
+    if (rows.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('لا يوجد شيء للاسترجاع في هذه الفعيلة'),
         backgroundColor: AppTheme.errorColor,
       ));
       return;
     }
+    final selected = {for (final r in rows) r['id'] as int};
+
+    final restoreIds = await showDialog<Set<int>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text('استرجاع فعيلة: $group', style: const TextStyle(color: AppTheme.primaryColor, fontSize: 16)),
+          content: SizedBox(
+            width: 420,
+            height: 420,
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => setDialogState(() => selected.addAll({for (final r in rows) r['id'] as int})),
+                      child: const Text('تحديد الكل'),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => setDialogState(() => selected.clear()),
+                      child: const Text('مسح التحديد'),
+                    ),
+                    const Spacer(),
+                    Text('محدد: ${selected.length} / ${rows.length}',
+                        style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                  ],
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: rows.length,
+                    itemBuilder: (ctx, i) {
+                      final row = rows[i];
+                      final id = row['id'] as int;
+                      final checked = selected.contains(id);
+                      return CheckboxListTile(
+                        dense: true,
+                        value: checked,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Text(
+                          '${_actionLabel(row['action'] as String)} — ${row['entity_name'] ?? ''}',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        subtitle: Text(
+                          '${_fieldLabel(row['field'] as String?).isNotEmpty ? '${_fieldLabel(row['field'] as String?)}: ' : ''}${row['old_value'] ?? ''} ← ${row['new_value'] ?? ''}',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        onChanged: (v) => setDialogState(() {
+                          if (v == true) {
+                            selected.add(id);
+                          } else {
+                            selected.remove(id);
+                          }
+                        }),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: AppTheme.neutralLightColor,
+              ),
+              onPressed: selected.isEmpty
+                  ? null
+                  : () => Navigator.pop(ctx, Set<int>.from(selected)),
+              child: Text('استرجاع المحدد (${selected.length})'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (restoreIds == null || restoreIds.isEmpty) return;
+
+    // ترتيب تصاعدي: الأقدم أولاً حتى يصح الترجيع التسلسلي
+    final ids = restoreIds.toList()..sort();
     final count = await DatabaseHelper.instance.restoreActivityLogs(ids);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('تم استرجاع $count عملية من الفعيلة'),
+      content: Text(count > 0
+          ? 'تم استرجاع $count من ${ids.length} عملية محددة'
+          : 'تعذر الاسترجاع — ربما العناصر محذوفة أو مسترجعة سابقاً'),
       backgroundColor: count > 0 ? AppTheme.successColor : AppTheme.errorColor,
     ));
     _loadLogs();
@@ -359,7 +427,10 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
                       color: AppTheme.primaryColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Text('جماعي', style: TextStyle(fontSize: 11, color: AppTheme.primaryColor)),
+                    child: Text(
+                      bulkGroup?.isNotEmpty == true ? bulkGroup! : 'جماعي',
+                      style: const TextStyle(fontSize: 11, color: AppTheme.primaryColor),
+                    ),
                   ),
                 if (undone)
                   Container(
@@ -401,7 +472,7 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
                     TextButton.icon(
                       onPressed: () => _restoreGroup(bulkGroup!),
                       icon: const Icon(Icons.restore, size: 16),
-                      label: const Text('استرجاع الفعيلة', style: TextStyle(fontSize: 12)),
+                      label: const Text('استرجاع الفعيلة (تحديد)', style: TextStyle(fontSize: 12)),
                       style: TextButton.styleFrom(
                         foregroundColor: AppTheme.successColor,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
