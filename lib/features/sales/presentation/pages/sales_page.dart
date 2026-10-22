@@ -12,8 +12,7 @@ import 'package:cashier_system/features/sales/presentation/widgets/weekly_sales_
 enum SalesFilter { today, thisWeek, thisMonth, customMonth, customRange, all }
 
 class SalesPage extends StatefulWidget {
-  final bool showProfit;
-  const SalesPage({Key? key, this.showProfit = true}) : super(key: key);
+  const SalesPage({Key? key}) : super(key: key);
 
   @override
   State<SalesPage> createState() => _SalesPageState();
@@ -381,20 +380,18 @@ class _SalesPageState extends State<SalesPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.showProfit ? 'المبيعات' : 'الفواتير القديمة', style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('المبيعات', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
-          if (widget.showProfit) ...[
-            IconButton(
-              icon: const Icon(Icons.backup),
-              onPressed: _backupDatabase,
-              tooltip: 'نسخ احتياطي',
-            ),
-            IconButton(
-              icon: const Icon(Icons.picture_as_pdf),
-              onPressed: _sales.isEmpty ? null : _exportSalesReport,
-              tooltip: 'تصدير تقرير PDF',
-            ),
-          ],
+          IconButton(
+            icon: const Icon(Icons.backup),
+            onPressed: _backupDatabase,
+            tooltip: 'نسخ احتياطي',
+          ),
+          IconButton(
+            icon: const Icon(Icons.picture_as_pdf),
+            onPressed: _sales.isEmpty ? null : _exportSalesReport,
+            tooltip: 'تصدير تقرير PDF',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadData,
@@ -409,11 +406,9 @@ class _SalesPageState extends State<SalesPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  // رأس المال (قيمة المخزون الإجمالية) — للمالك فقط
-                  if (widget.showProfit) ...[
-                    _buildInventoryCard(),
-                    const SizedBox(height: 12),
-                  ],
+                  // رأس المال (قيمة المخزون الإجمالية)
+                  _buildInventoryCard(),
+                  const SizedBox(height: 12),
                   // ملخص اليوم
                   _buildSummaryCard(
                     title: 'مبيعات اليوم',
@@ -670,13 +665,11 @@ class _SalesPageState extends State<SalesPage> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _buildStatColumn('الإيرادات', '$rev د', AppTheme.primaryColor),
-            if (widget.showProfit) ...[
-              _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
-              _buildStatColumn('المصروفات', '$exp د', AppTheme.errorColor),
-              _buildStatColumn('الأرباح', '$pro د', AppTheme.successColor),
-              _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
-            ],
+            _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
+            _buildStatColumn('المصروفات', '$exp د', AppTheme.errorColor),
+            _buildStatColumn('الأرباح', '$pro د', AppTheme.successColor),
             _buildStatColumn('القطع', '$units', AppTheme.primaryColor),
+            _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
           ],
         ),
       ),
@@ -715,13 +708,11 @@ class _SalesPageState extends State<SalesPage> {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildStatColumn('الإيرادات', '$revenue د', AppTheme.primaryColor),
-                if (widget.showProfit) ...[
-                  _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
-                  _buildStatColumn('المصروفات', '$expenses د', AppTheme.errorColor),
-                  _buildStatColumn('الأرباح', '$profit د', AppTheme.successColor),
-                  _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
-                ],
+                _buildStatColumn('التكلفة', '$cost د', AppTheme.warningColor),
+                _buildStatColumn('المصروفات', '$expenses د', AppTheme.errorColor),
+                _buildStatColumn('الأرباح', '$profit د', AppTheme.successColor),
                 _buildStatColumn('القطع', '$units', AppTheme.primaryColor),
+                _buildStatColumn('صافي الكاش', '$netCash د', AppTheme.primaryColor),
               ],
             ),
           ],
@@ -802,12 +793,7 @@ class _SalesPageState extends State<SalesPage> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              widget.showProfit
-                  ? '$receiptNumber  |  ربح: $totalProfit د  |  $timeStr'
-                  : '$receiptNumber  |  $timeStr',
-              style: const TextStyle(fontSize: 12),
-            ),
+            Text('$receiptNumber  |  ربح: $totalProfit د  |  $timeStr', style: const TextStyle(fontSize: 12)),
             if (saleCustomerName.isNotEmpty)
               Text('👤 $saleCustomerName', style: TextStyle(fontSize: 12, color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
           ],
@@ -1417,4 +1403,196 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
       ),
     );
   }
+}
+
+// ─── نافذة بحث الفواتير (تفتح من زر صفحة الكاشير) ───
+// عرض الفواتير + استرجاع قطع / طباعة / نسبة لزبون — بدون إظهار الأرباح
+Future<void> showInvoiceSearchSheet(BuildContext context) async {
+  String productQuery = '';
+  String receiptQuery = '';
+  List<Map<String, dynamic>> results = [];
+  bool searched = false;
+
+  await showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (sheetCtx) => StatefulBuilder(
+      builder: (sheetCtx, setSheetState) {
+        Future<void> doSearch() async {
+          final res = await DatabaseHelper.instance.searchSalesByProduct(
+            productQuery.trim(),
+            receiptQuery: receiptQuery.trim(),
+          );
+          setSheetState(() {
+            results = res;
+            searched = true;
+          });
+        }
+
+        Future<void> openDetails(Map<String, dynamic> sale) async {
+          final saleId = sale['id'] as int;
+          final totalAmount = sale['total_amount'] as int? ?? 0;
+          final discountAmount = sale['discount_amount'] as int? ?? 0;
+          final createdAt = (sale['created_at'] as String? ?? '').replaceAll('T', '  ');
+          final timeStr = createdAt.length >= 16 ? createdAt.substring(0, 16) : createdAt;
+          final customerName = sale['customer_name'] as String? ?? '';
+          final items = await DatabaseHelper.instance.getSaleItems(saleId);
+          if (!sheetCtx.mounted) return;
+          await showModalBottomSheet(
+            context: sheetCtx,
+            isScrollControlled: true,
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+            builder: (ctx) => _SaleDetailsSheet(
+              saleId: saleId,
+              totalAmount: totalAmount,
+              discountAmount: discountAmount,
+              time: timeStr,
+              customerName: customerName,
+              items: items,
+              onReturnDone: () => doSearch(), // تحديث النتائج بعد الاسترجاع
+            ),
+          );
+        }
+
+        final size = MediaQuery.of(sheetCtx).size;
+        return SizedBox(
+          height: size.height * 0.85,
+          child: Column(
+            children: [
+              // العنوان
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    const Icon(Icons.fact_check, color: AppTheme.primaryColor),
+                    const SizedBox(width: 8),
+                    const Text('بحث في الفواتير', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              // حقول البحث
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        decoration: InputDecoration(
+                          hintText: 'اسم المنتج / باركود / لون...',
+                          prefixIcon: const Icon(Icons.search, color: AppTheme.primaryColor, size: 20),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          filled: true,
+                          fillColor: Colors.white,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        ),
+                        autofocus: true,
+                        style: const TextStyle(fontSize: 13),
+                        onChanged: (v) => productQuery = v,
+                        onSubmitted: (_) => doSearch(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 130,
+                      child: TextField(
+                        decoration: InputDecoration(
+                          hintText: 'رقم الوصل',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          filled: true,
+                          fillColor: Colors.white,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        ),
+                        style: const TextStyle(fontSize: 13),
+                        onChanged: (v) => receiptQuery = v,
+                        onSubmitted: (_) => doSearch(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.all(12),
+                      ),
+                      onPressed: doSearch,
+                      child: const Icon(Icons.search),
+                    ),
+                  ],
+                ),
+              ),
+              // النتائج
+              Expanded(
+                child: !searched
+                    ? const Center(
+                        child: Text('اكتب اسم المنتج ثم اضغط بحث', style: TextStyle(color: AppTheme.textSecondary)),
+                      )
+                    : results.isEmpty
+                        ? const Center(
+                            child: Text('لا توجد فواتير مطابقة', style: TextStyle(color: AppTheme.textSecondary)),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            itemCount: results.length,
+                            itemBuilder: (ctx, i) {
+                              final sale = results[i];
+                              final totalAmount = sale['total_amount'] as int? ?? 0;
+                              final discountAmount = sale['discount_amount'] as int? ?? 0;
+                              final itemsCount = sale['items_count'] as int? ?? 0;
+                              final receiptNumber = sale['receipt_number'] as String? ?? 'R${(sale['id'] as int).toString().padLeft(6, '0')}';
+                              final createdAt = (sale['created_at'] as String? ?? '').replaceAll('T', '  ');
+                              final timeStr = createdAt.length >= 16 ? createdAt.substring(0, 16) : createdAt;
+                              final customerName = sale['customer_name'] as String? ?? '';
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                child: ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: AppTheme.primaryColor,
+                                    child: Text('$itemsCount', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                  ),
+                                  title: Row(
+                                    children: [
+                                      Text('$totalAmount دينار', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      if (discountAmount > 0) ...[
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.errorColor.withValues(alpha: 0.1),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text('خصم $discountAmount', style: const TextStyle(color: AppTheme.errorColor, fontSize: 11, fontWeight: FontWeight.bold)),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                  subtitle: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('$receiptNumber  |  $timeStr', style: const TextStyle(fontSize: 12)),
+                                      if (customerName.isNotEmpty)
+                                        Text('👤 $customerName', style: const TextStyle(fontSize: 12, color: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                  trailing: const Icon(Icons.chevron_left, color: AppTheme.textSecondary),
+                                  onTap: () => openDetails(sale),
+                                ),
+                              );
+                            },
+                          ),
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
 }
