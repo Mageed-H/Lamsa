@@ -10,6 +10,7 @@ import 'package:cashier_system/core/database/database_helper.dart';
 import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/core/widgets/custom_button.dart';
 import 'package:cashier_system/core/widgets/custom_text_field.dart';
+import 'package:cashier_system/features/activity_log/presentation/pages/activity_log_page.dart';
 import 'package:cashier_system/features/products/data/models/product_model.dart';
 import 'package:cashier_system/features/products/presentation/widgets/barcode_printer_widget.dart';
 
@@ -1319,10 +1320,17 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                 onSelected: (v) {
                   if (v == 'low_stock') _exportLowStockPdf();
                   if (v == 'adjustment_log') _showAllAdjustmentLog();
+                  if (v == 'activity_log') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const ActivityLogPage()),
+                    );
+                  }
                 },
                 itemBuilder: (_) => const [
                   PopupMenuItem(value: 'low_stock', child: Row(children: [Icon(Icons.warning_amber, size: 18, color: AppTheme.errorColor), SizedBox(width: 8), Text('تصدير المنتجات قليلة المخزون')])),
                   PopupMenuItem(value: 'adjustment_log', child: Row(children: [Icon(Icons.history, size: 18, color: AppTheme.primaryColor), SizedBox(width: 8), Text('سجل تصحيحات الجرد')])),
+                  PopupMenuItem(value: 'activity_log', child: Row(children: [Icon(Icons.fact_check, size: 18, color: AppTheme.successColor), SizedBox(width: 8), Text('سجل التعديلات الشامل')])),
                 ],
               ),
             if (_tabController.index == 1 && _isSelectionMode) ...[
@@ -2700,9 +2708,12 @@ trailing: _isSelectionMode
         ),
       );
       if (confirmed != true || !mounted) return;
+      final group = 'bulk${DateTime.now().microsecondsSinceEpoch}';
       int deleted = 0;
       for (final id in _selectedProductIds) {
-        final success = await DatabaseHelper.instance.deleteProductWithLog(id);
+        final success = await DatabaseHelper.instance.deleteProductWithLog(
+          id, activityGroup: group, isBulk: true,
+        );
         if (success) deleted++;
       }
       if (mounted) {
@@ -2748,10 +2759,30 @@ trailing: _isSelectionMode
         ),
       );
       if (confirmed == null || confirmed.isEmpty || !mounted) return;
+      final group = 'bulk${DateTime.now().microsecondsSinceEpoch}';
       final db = await DatabaseHelper.instance.database;
       await db.transaction((txn) async {
         for (final id in _selectedProductIds) {
+          final rows = await txn.query('products', columns: ['name', 'category'], where: 'id = ?', whereArgs: [id]);
+          if (rows.isEmpty) continue;
+          final oldCat = rows.first['category'] as String? ?? '';
           await txn.update('products', {'category': confirmed}, where: 'id = ?', whereArgs: [id]);
+          if (oldCat != confirmed) {
+            await txn.insert('activity_log', {
+              'action': 'edit',
+              'entity': 'product_field',
+              'entity_id': id,
+              'entity_name': rows.first['name'],
+              'field': 'category',
+              'old_value': oldCat,
+              'new_value': confirmed,
+              'is_bulk': 1,
+              'bulk_group': group,
+              'undoable': 1,
+              'undone': 0,
+              'created_at': DateTime.now().toIso8601String(),
+            });
+          }
         }
       });
       if (mounted) {
@@ -2788,10 +2819,30 @@ trailing: _isSelectionMode
       );
       colorCtrl.dispose();
       if (confirmed == null || confirmed.isEmpty || !mounted) return;
+      final group = 'bulk${DateTime.now().microsecondsSinceEpoch}';
       final db = await DatabaseHelper.instance.database;
       await db.transaction((txn) async {
         for (final id in _selectedProductIds) {
+          final rows = await txn.query('products', columns: ['name', 'color'], where: 'id = ?', whereArgs: [id]);
+          if (rows.isEmpty) continue;
+          final oldColor = rows.first['color'] as String? ?? '';
           await txn.update('products', {'color': confirmed}, where: 'id = ?', whereArgs: [id]);
+          if (oldColor != confirmed) {
+            await txn.insert('activity_log', {
+              'action': 'edit',
+              'entity': 'product_field',
+              'entity_id': id,
+              'entity_name': rows.first['name'],
+              'field': 'color',
+              'old_value': oldColor,
+              'new_value': confirmed,
+              'is_bulk': 1,
+              'bulk_group': group,
+              'undoable': 1,
+              'undone': 0,
+              'created_at': DateTime.now().toIso8601String(),
+            });
+          }
         }
       });
       if (mounted) {
@@ -2836,29 +2887,65 @@ trailing: _isSelectionMode
       );
       if (confirmed != true || !mounted) return;
       try {
+        final group = 'bulk${DateTime.now().microsecondsSinceEpoch}';
         final db = await DatabaseHelper.instance.database;
         await db.transaction((txn) async {
           for (final id in _selectedProductIds) {
-            final rows = await txn.query('products', columns: ['sell_price', 'purchase_price'], where: 'id = ?', whereArgs: [id]);
+            final rows = await txn.query('products', columns: ['name', 'price', 'purchase_price'], where: 'id = ?', whereArgs: [id]);
             if (rows.isEmpty) continue;
-            final currentSell = (rows.first['sell_price'] as num?)?.toDouble() ?? 0;
-            final currentBuy = (rows.first['purchase_price'] as num?)?.toDouble() ?? 0;
+            final currentSell = (rows.first['price'] as num?)?.toInt() ?? 0;
+            final currentBuy = (rows.first['purchase_price'] as num?)?.toInt() ?? 0;
             final updates = <String, dynamic>{};
             if (sellValue != null) {
               switch (_bulkPriceMode) {
-                case 0: updates['sell_price'] = currentSell + sellValue; break;
-                case 1: updates['sell_price'] = (currentSell - sellValue).clamp(0.0, 999999999.0); break;
-                default: updates['sell_price'] = sellValue;
+                case 0: updates['price'] = currentSell + sellValue.toInt(); break;
+                case 1: updates['price'] = (currentSell - sellValue.toInt()).clamp(0, 999999999); break;
+                default: updates['price'] = sellValue.toInt();
               }
             }
             if (buyValue != null) {
               switch (_bulkPriceMode) {
-                case 0: updates['purchase_price'] = currentBuy + buyValue; break;
-                case 1: updates['purchase_price'] = (currentBuy - buyValue).clamp(0.0, 999999999.0); break;
-                default: updates['purchase_price'] = buyValue;
+                case 0: updates['purchase_price'] = currentBuy + buyValue.toInt(); break;
+                case 1: updates['purchase_price'] = (currentBuy - buyValue.toInt()).clamp(0, 999999999); break;
+                default: updates['purchase_price'] = buyValue.toInt();
               }
             }
-            if (updates.isNotEmpty) await txn.update('products', updates, where: 'id = ?', whereArgs: [id]);
+            if (updates.isNotEmpty) {
+              await txn.update('products', updates, where: 'id = ?', whereArgs: [id]);
+              final now = DateTime.now().toIso8601String();
+              if (updates.containsKey('price') && updates['price'] != currentSell) {
+                await txn.insert('activity_log', {
+                  'action': 'edit',
+                  'entity': 'product_field',
+                  'entity_id': id,
+                  'entity_name': rows.first['name'],
+                  'field': 'price',
+                  'old_value': '$currentSell',
+                  'new_value': '${updates['price']}',
+                  'is_bulk': 1,
+                  'bulk_group': group,
+                  'undoable': 1,
+                  'undone': 0,
+                  'created_at': now,
+                });
+              }
+              if (updates.containsKey('purchase_price') && updates['purchase_price'] != currentBuy) {
+                await txn.insert('activity_log', {
+                  'action': 'edit',
+                  'entity': 'product_field',
+                  'entity_id': id,
+                  'entity_name': rows.first['name'],
+                  'field': 'purchase_price',
+                  'old_value': '$currentBuy',
+                  'new_value': '${updates['purchase_price']}',
+                  'is_bulk': 1,
+                  'bulk_group': group,
+                  'undoable': 1,
+                  'undone': 0,
+                  'created_at': now,
+                });
+              }
+            }
           }
         });
         if (mounted) {
@@ -2901,6 +2988,7 @@ trailing: _isSelectionMode
     if (confirmed != true || !mounted) return;
 
     try {
+      final group = 'bulk${DateTime.now().microsecondsSinceEpoch}';
       final db = await DatabaseHelper.instance.database;
       await db.transaction((txn) async {
         for (final id in _selectedProductIds) {
@@ -2915,6 +3003,7 @@ trailing: _isSelectionMode
             default: newStock = qty;
           }
           await txn.update('products', {'stock': newStock}, where: 'id = ?', whereArgs: [id]);
+          final now = DateTime.now().toIso8601String();
           await txn.insert('stock_adjustments', {
             'product_id': id,
             'product_name': productName,
@@ -2922,7 +3011,21 @@ trailing: _isSelectionMode
             'new_stock': newStock,
             'difference': newStock - currentStock,
             'reason': 'جمع: $opName $qty',
-            'created_at': DateTime.now().toIso8601String(),
+            'created_at': now,
+          });
+          await txn.insert('activity_log', {
+            'action': 'stock',
+            'entity': 'stock',
+            'entity_id': id,
+            'entity_name': productName,
+            'field': 'stock',
+            'old_value': '$currentStock',
+            'new_value': '$newStock',
+            'is_bulk': 1,
+            'bulk_group': group,
+            'undoable': 1,
+            'undone': 0,
+            'created_at': now,
           });
         }
       });

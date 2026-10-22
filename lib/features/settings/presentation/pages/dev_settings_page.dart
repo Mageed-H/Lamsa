@@ -8,6 +8,7 @@ import 'package:cashier_system/core/theme/app_theme.dart';
 import 'package:cashier_system/core/services/error_logger.dart';
 import 'package:cashier_system/core/services/pin_hash.dart';
 import 'package:cashier_system/core/services/dev_lock_service.dart';
+import 'package:cashier_system/features/activity_log/presentation/pages/activity_log_page.dart';
 
 /// صفحة إعدادات المطور — لا تظهر في القائمة الرئيسية
 /// يُفتح عبر: Ctrl + Alt + Shift ثم اكتب  d e v m h
@@ -299,6 +300,9 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       pinFutures.add(DatabaseHelper.instance.setSetting('expenses_pin', PinHash.hash(_expensesPinCtrl.text.trim())));
     }
 
+    // التقاط القيم القديمة لتسجيل التغييرات في سجل التعديلات الشامل
+    final oldSettings = await DatabaseHelper.instance.getAllSettings();
+
     await Future.wait([
       DatabaseHelper.instance.setSetting('store_name', _storeNameCtrl.text.trim()),
       DatabaseHelper.instance.setSetting('store_phone', _storePhoneCtrl.text.trim()),
@@ -322,6 +326,44 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
       DatabaseHelper.instance.setSetting('log_level', _selectedLogLevel),
       ...pinFutures,
     ]);
+
+    // تسجيل تغييرات الإعدادات في سجل التعديلات الشامل (بدون الرموز السرية)
+    final newValues = <String, String>{
+      'store_name': _storeNameCtrl.text.trim(),
+      'store_phone': _storePhoneCtrl.text.trim(),
+      'currency': _currencyCtrl.text.trim(),
+      'low_stock_threshold': _lowStockCtrl.text.trim(),
+      'default_barcode_copies': _defaultCopiesCtrl.text.trim(),
+      'receipt_footer': _receiptFooterCtrl.text.trim(),
+      'receipt_title_font_size': _titleFontCtrl.text.trim(),
+      'receipt_body_font_size': _bodyFontCtrl.text.trim(),
+      'receipt_paper_width_mm': _paperWidthCtrl.text.trim(),
+      'barcode_label_width_mm': _barcodeWCtrl.text.trim(),
+      'barcode_label_height_mm': _barcodeHCtrl.text.trim(),
+      'barcode_padding_top_mm': _barcodePadTopCtrl.text.trim(),
+      'barcode_padding_bottom_mm': _barcodePadBottomCtrl.text.trim(),
+      'barcode_padding_left_mm': _barcodePadLeftCtrl.text.trim(),
+      'barcode_padding_right_mm': _barcodePadRightCtrl.text.trim(),
+      'receipt_margin_top_mm': _receiptMarginTopCtrl.text.trim(),
+      'receipt_margin_bottom_mm': _receiptMarginBottomCtrl.text.trim(),
+      'receipt_margin_left_mm': _receiptMarginLeftCtrl.text.trim(),
+      'receipt_margin_right_mm': _receiptMarginRightCtrl.text.trim(),
+      'log_level': _selectedLogLevel,
+    };
+    for (final entry in newValues.entries) {
+      final oldVal = oldSettings[entry.key] ?? '';
+      if (oldVal != entry.value) {
+        await DatabaseHelper.instance.logActivity(
+          action: 'edit',
+          entity: 'setting',
+          entityName: 'الإعدادات',
+          field: entry.key,
+          oldValue: oldVal,
+          newValue: entry.value,
+          undoable: true,
+        );
+      }
+    }
 
     // توليد QR SVG وحفظه بالكاش إذا الرابط تغير
     await _regenerateQrCache();
@@ -1009,6 +1051,27 @@ class _DevSettingsPageState extends State<DevSettingsPage> {
                       icon: const Icon(Icons.restore),
                       label: const Text('استيراد نسخة احتياطية', style: TextStyle(fontWeight: FontWeight.bold)),
                       onPressed: _importDatabase,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // سجل التعديلات الشامل
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.tealAccent.shade200,
+                        side: BorderSide(color: Colors.tealAccent.shade200.withValues(alpha: 0.6)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: const Icon(Icons.fact_check),
+                      label: const Text('سجل التعديلات الشامل (قابل للاسترجاع)', style: TextStyle(fontWeight: FontWeight.bold)),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const ActivityLogPage()),
+                        );
+                      },
                     ),
                   ),
                   const Padding(

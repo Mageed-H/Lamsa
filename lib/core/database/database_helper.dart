@@ -1,4 +1,5 @@
-﻿import 'dart:io';
+﻿import 'dart:convert';
+import 'dart:io';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
@@ -79,7 +80,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 19, // الإصدار 19: سجل إضافات ديون المحل
+      version: 20, // الإصدار 20: سجل التعديلات الشامل (activity_log) مع الاسترجاع
       onConfigure: _onConfigure, // مفتاح التشفير + العلاقات (Foreign Keys)
       onCreate: _createDB,
       onUpgrade: _upgradeDB, // التحديث الآمن
@@ -453,6 +454,7 @@ class DatabaseHelper {
     await _createV17Tables(db);
     await _createV18Tables(db);
     await _createV19Tables(db);
+    await _createV20Tables(db);
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -519,6 +521,248 @@ class DatabaseHelper {
     if (oldVersion < 19) {
       await _createV19Tables(db);
     }
+    if (oldVersion < 20) {
+      await _createV20Tables(db);
+    }
+  }
+
+  // ==========================================================
+  // سجل التعديلات الشامل (v20) — كل عمليات التغيير قابلة للعرض والاسترجاع
+  // ==========================================================
+  Future _createV20Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS activity_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action TEXT NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id INTEGER,
+        entity_name TEXT,
+        field TEXT,
+        old_value TEXT,
+        new_value TEXT,
+        data_json TEXT,
+        is_bulk INTEGER DEFAULT 0,
+        bulk_group TEXT,
+        undoable INTEGER DEFAULT 0,
+        undone INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_al_date ON activity_log (created_at);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_al_entity ON activity_log (entity);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_al_bulk ON activity_log (bulk_group);');
+  }
+
+  /// تسجيل عملية في سجل التعديلات
+  Future<void> logActivity({
+    required String action,
+    required String entity,
+    int? entityId,
+    String? entityName,
+    String? field,
+    String? oldValue,
+    String? newValue,
+    String? dataJson,
+    bool isBulk = false,
+    String? bulkGroup,
+    bool undoable = false,
+    Database? txn,
+  }) async {
+    try {
+      final db = txn ?? await instance.database;
+      await db.insert('activity_log', {
+        'action': action,
+        'entity': entity,
+        'entity_id': entityId,
+        'entity_name': entityName,
+        'field': field,
+        'old_value': oldValue,
+        'new_value': newValue,
+        'data_json': dataJson,
+        'is_bulk': isBulk ? 1 : 0,
+        'bulk_group': bulkGroup,
+        'undoable': undoable ? 1 : 0,
+        'undone': 0,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      await ErrorLogger.instance.error('فشل تسجيل في سجل التعديلات', data: {'entity': entity, 'action': action, 'error': '$e'});
+    }
+  }
+
+  /// جلب سجل التعديلات مع فلاتر
+  Future<List<Map<String, dynamic>>> getActivityLogs({
+    String? entity,
+    String? search,
+    DateTime? fromDate,
+    int limit = 300,
+  }) async {
+    try {
+      final db = await instance.database;
+      final where = <String>[];
+      final args = <dynamic>[];
+      if (entity != null && entity.isNotEmpty) {
+        where.add('entity = ?');
+        args.add(entity);
+      }
+      if (search != null && search.trim().isNotEmpty) {
+        where.add('entity_name LIKE ?');
+        args.add('%${search.trim()}%');
+      }
+      if (fromDate != null) {
+        where.add('created_at >= ?');
+        args.add(fromDate.toIso8601String());
+      }
+      return await db.query(
+        'activity_log',
+        where: where.isEmpty ? null : where.join(' AND '),
+        whereArgs: where.isEmpty ? null : args,
+        orderBy: 'id DESC',
+        limit: limit,
+      );
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// استرجاع سجل واحد أو مجموعة (بالترتيب من الأقدم)
+  Future<int> restoreActivityLogs(List<int> logIds) async {
+    if (logIds.isEmpty) return 0;
+    final db = await instance.database;
+    int restored = 0;
+    // ترتيب تصاعدي: أقدم أولاً حتى يصح الترجيع التسلسلي
+    final sorted = [...logIds]..sort();
+    await db.transaction((txn) async {
+      for (final id in sorted) {
+        final rows = await txn.query('activity_log', where: 'id = ?', whereArgs: [id]);
+        if (rows.isEmpty) continue;
+        final log = rows.first;
+        if ((log['undone'] as int? ?? 0) == 1) continue;
+        final entity = log['entity'] as String;
+        final action = log['action'] as String;
+        final entityId = log['entity_id'] as int?;
+        final entityName = log['entity_name'] as String?;
+        final field = log['field'] as String?;
+        final oldValue = log['old_value'] as String?;
+        final dataJson = log['data_json'] as String?;
+
+        bool applied = false;
+        try {
+          switch (entity) {
+            case 'product_field':
+              if (entityId != null && field != null && oldValue != null) {
+                const allowed = [
+                  'name', 'category', 'color', 'size', 'barcode',
+                  'price', 'purchase_price', 'stock',
+                ];
+                if (allowed.contains(field)) {
+                  final exists = await txn.query('products', where: 'id = ?', whereArgs: [entityId], limit: 1);
+                  if (exists.isNotEmpty) {
+                    dynamic val = oldValue;
+                    if (field == 'price' || field == 'purchase_price' || field == 'stock') {
+                      val = int.tryParse(oldValue) ?? 0;
+                    }
+                    await txn.update('products', {field: val}, where: 'id = ?', whereArgs: [entityId]);
+                    applied = true;
+                  }
+                }
+              }
+              break;
+            case 'product':
+              // حذف منتج → إعادة إضافته من اللقطة
+              if (action == 'delete' && dataJson != null) {
+                try {
+                  final data = jsonDecode(dataJson) as Map<String, dynamic>;
+                  final extraBarcodes = (data.remove('_extra_barcodes') as List?) ?? const [];
+                  final pid = data['id'];
+                  final existing = await txn.query('products', where: 'id = ?', whereArgs: [pid], limit: 1);
+                  if (existing.isEmpty) {
+                    await txn.insert('products', data);
+                    for (final bc in extraBarcodes) {
+                      await txn.insert('product_barcodes',
+                          {'product_id': pid, 'barcode': bc}, conflictAlgorithm: ConflictAlgorithm.ignore);
+                    }
+                    applied = true;
+                  }
+                } catch (_) {}
+              }
+              break;
+            case 'stock':
+              if (entityId != null && oldValue != null) {
+                await txn.update('products', {'stock': int.tryParse(oldValue) ?? 0}, where: 'id = ?', whereArgs: [entityId]);
+                applied = true;
+              }
+              break;
+            case 'category':
+              if (entityName != null) {
+                if (action == 'edit' && field == 'name' && oldValue != null) {
+                  final newName = log['new_value'] as String? ?? '';
+                  // تغيير القسم الجديد رجوعاً للقديم في كل المنتجات
+                  await txn.update('products', {'category': oldValue}, where: 'category = ?', whereArgs: [newName]);
+                  await txn.update('categories', {'name': oldValue}, where: 'name = ?', whereArgs: [newName]);
+                  applied = true;
+                } else if (action == 'delete' && oldValue != null) {
+                  await txn.insert('categories', {'name': oldValue}, conflictAlgorithm: ConflictAlgorithm.ignore);
+                  applied = true;
+                }
+              }
+              break;
+            case 'setting':
+              if (field != null) {
+                await txn.insert('settings', {'key': field, 'value': oldValue ?? ''},
+                    conflictAlgorithm: ConflictAlgorithm.replace);
+                applied = true;
+              }
+              break;
+            case 'customer':
+              if (entityId != null) {
+                if (action == 'delete' && dataJson != null) {
+                  final data = jsonDecode(dataJson) as Map<String, dynamic>;
+                  final existing = await txn.query('customers', where: 'id = ?', whereArgs: [entityId], limit: 1);
+                  if (existing.isEmpty) {
+                    await txn.insert('customers', data);
+                    applied = true;
+                  }
+                } else if (action == 'edit' && field != null && oldValue != null) {
+                  await txn.update('customers', {field: oldValue}, where: 'id = ?', whereArgs: [entityId]);
+                  applied = true;
+                }
+              }
+              break;
+            case 'expense':
+              if (action == 'delete' && dataJson != null && entityId != null) {
+                final data = jsonDecode(dataJson) as Map<String, dynamic>;
+                final existing = await txn.query('expenses', where: 'id = ?', whereArgs: [entityId], limit: 1);
+                if (existing.isEmpty) {
+                  await txn.insert('expenses', data);
+                  applied = true;
+                }
+              }
+              break;
+            case 'debt':
+              if (action == 'debt_add' && entityId != null && oldValue != null) {
+                await txn.update('shop_debts', {'amount': int.tryParse(oldValue) ?? 0}, where: 'id = ?', whereArgs: [entityId]);
+                applied = true;
+              }
+              break;
+          }
+        } catch (e) {
+          await ErrorLogger.instance.error('فشل استرجاع سجل', data: {'log_id': id, 'error': '$e'});
+          continue;
+        }
+
+        if (applied) {
+          await txn.update('activity_log', {'undone': 1}, where: 'id = ?', whereArgs: [id]);
+          restored++;
+        }
+      }
+    });
+    if (restored > 0) {
+      productsRevision.value++;
+      salesRevision.value++;
+      _notifyAll();
+    }
+    return restored;
   }
 
   Future _createV4Tables(Database db) async {
@@ -642,7 +886,16 @@ class DatabaseHelper {
           }, conflictAlgorithm: ConflictAlgorithm.ignore);
         }
       });
-      if (productId > 0) { productsRevision.value++; _notifyAll(); }
+      if (productId > 0) {
+        await logActivity(
+          action: 'add',
+          entity: 'product',
+          entityId: productId,
+          entityName: product.name,
+          newValue: '${product.name} — ${product.color}${product.size.isNotEmpty ? ' / ${product.size}' : ''}',
+        );
+        productsRevision.value++; _notifyAll();
+      }
       return productId;
     } catch (e) {
       print('Error inserting product: $e');
@@ -686,6 +939,8 @@ class DatabaseHelper {
   Future<int> updateProduct(ProductModel product) async {
     try {
       final db = await instance.database;
+      // جلب الصف القديم للتوسيع (تسجيل التغييرات في سجل التعديلات)
+      final oldRows = await db.query('products', where: 'id = ?', whereArgs: [product.id], limit: 1);
       final rows = await db.update('products', product.toMap(), where: 'id = ?', whereArgs: [product.id]);
       if (rows > 0) {
         // مزامنة products.barcode من أول باركود في product_barcodes (المصدر الأساسي)
@@ -696,6 +951,32 @@ class DatabaseHelper {
           if (firstBarcode != product.barcode) {
             await db.update('products', {'barcode': firstBarcode},
                 where: 'id = ?', whereArgs: [product.id]);
+          }
+        }
+        // تسجيل الفروقات في سجل التعديلات (لكل حقل سجل مستقل قابل للاسترجاع)
+        if (oldRows.isNotEmpty) {
+          const watchFields = [
+            'name', 'category', 'color', 'size', 'barcode',
+            'price', 'purchase_price', 'stock',
+          ];
+          final oldMap = oldRows.first;
+          final newMap = product.toMap();
+          for (final f in watchFields) {
+            final oldVal = oldMap[f];
+            final newVal = newMap[f];
+            if (oldVal == null && newVal == null) continue;
+            if ('$oldVal' != '$newVal') {
+              await logActivity(
+                action: 'edit',
+                entity: 'product_field',
+                entityId: product.id,
+                entityName: oldMap['name'] as String? ?? product.name,
+                field: f,
+                oldValue: '$oldVal',
+                newValue: '$newVal',
+                undoable: true,
+              );
+            }
           }
         }
         productsRevision.value++;
@@ -714,7 +995,11 @@ class DatabaseHelper {
   Future<int> insertCategory(String name) async {
     try {
       final db = await instance.database;
-      return await db.insert('categories', {'name': name}, conflictAlgorithm: ConflictAlgorithm.ignore);
+      final id = await db.insert('categories', {'name': name}, conflictAlgorithm: ConflictAlgorithm.ignore);
+      if (id > 0) {
+        await logActivity(action: 'add', entity: 'category', entityName: name, newValue: name);
+      }
+      return id;
     } catch (e) {
       print('Error inserting category: $e');
       return -1;
@@ -743,6 +1028,15 @@ class DatabaseHelper {
       );
       if (rows > 0) {
         await db.update('products', {'category': newName}, where: 'category = ?', whereArgs: [oldName]);
+        await logActivity(
+          action: 'edit',
+          entity: 'category',
+          entityName: newName,
+          field: 'name',
+          oldValue: oldName,
+          newValue: newName,
+          undoable: true,
+        );
         productsRevision.value++;
         _notifyAll();
       }
@@ -761,7 +1055,17 @@ class DatabaseHelper {
       );
       if (count != null && count > 0) return -1;
       final rows = await db.delete('categories', where: 'name = ?', whereArgs: [name]);
-      if (rows > 0) { productsRevision.value++; _notifyAll(); }
+      if (rows > 0) {
+        await logActivity(
+          action: 'delete',
+          entity: 'category',
+          entityName: name,
+          oldValue: name,
+          newValue: 'حذف',
+          undoable: true,
+        );
+        productsRevision.value++; _notifyAll();
+      }
       return rows;
     } catch (e) {
       print('Error deleting category: $e');
@@ -797,7 +1101,7 @@ class DatabaseHelper {
   }
 
   /// حذف منتج مع تسجيله في سجل الحذف (يمكن استرجاعه لاحقاً)
-  Future<bool> deleteProductWithLog(int id, {String deletedBy = 'user'}) async {
+  Future<bool> deleteProductWithLog(int id, {String deletedBy = 'user', String? activityGroup, bool isBulk = false}) async {
     try {
       final db = await instance.database;
       return await db.transaction((txn) async {
@@ -828,6 +1132,24 @@ class DatabaseHelper {
 
         // 4. حذف الباركودات الثانوية
         await txn.delete('product_barcodes', where: 'product_id = ?', whereArgs: [id]);
+
+        // 4.5 تسجيل في سجل التعديلات الشامل (استرجاع كامل من اللقطة)
+        final snapshot = Map<String, dynamic>.from(p);
+        snapshot['_extra_barcodes'] = barcodeRows.map((r) => r['barcode'] as String).toList();
+        await txn.insert('activity_log', {
+          'action': 'delete',
+          'entity': 'product',
+          'entity_id': id,
+          'entity_name': p['name'],
+          'old_value': '${p['name']} — ${p['category']}',
+          'new_value': 'حذف',
+          'data_json': jsonEncode(snapshot),
+          'is_bulk': isBulk ? 1 : 0,
+          'bulk_group': activityGroup,
+          'undoable': 1,
+          'undone': 0,
+          'created_at': DateTime.now().toIso8601String(),
+        });
 
         // 5. حذف المنتج
         await txn.delete('products', where: 'id = ?', whereArgs: [id]);
@@ -922,13 +1244,17 @@ class DatabaseHelper {
       // تحقق من عدم التكرار
       final existing = await db.query('customers', where: 'name = ?', whereArgs: [name.trim()]);
       if (existing.isNotEmpty) return -1;
-      return await db.insert('customers', {
+      final id = await db.insert('customers', {
         'name': name.trim(),
         'phone': phone.trim(),
         'address': address.trim(),
         'notes': notes.trim(),
         'created_at': DateTime.now().toIso8601String(),
       });
+      if (id > 0) {
+        await logActivity(action: 'add', entity: 'customer', entityId: id, entityName: name.trim(), newValue: name.trim());
+      }
+      return id;
     } catch (e) {
       return -1;
     }
@@ -962,7 +1288,29 @@ class DatabaseHelper {
       if (address != null) updates['address'] = address.trim();
       if (notes != null) updates['notes'] = notes.trim();
       if (updates.isEmpty) return 0;
-      return await db.update('customers', updates, where: 'id = ?', whereArgs: [id]);
+      // جلب الصف القديم لتسجيل التغييرات
+      final oldRows = await db.query('customers', where: 'id = ?', whereArgs: [id], limit: 1);
+      final rows = await db.update('customers', updates, where: 'id = ?', whereArgs: [id]);
+      if (rows > 0 && oldRows.isNotEmpty) {
+        final oldMap = oldRows.first;
+        for (final entry in updates.entries) {
+          final oldVal = '${oldMap[entry.key] ?? ''}';
+          final newVal = '${entry.value}';
+          if (oldVal != newVal) {
+            await logActivity(
+              action: 'edit',
+              entity: 'customer',
+              entityId: id,
+              entityName: '${oldMap['name'] ?? ''}',
+              field: entry.key,
+              oldValue: oldVal,
+              newValue: newVal,
+              undoable: true,
+            );
+          }
+        }
+      }
+      return rows;
     } catch (e) {
       return 0;
     }
@@ -974,7 +1322,21 @@ class DatabaseHelper {
       // تحقق إذا عند ديون
       final debts = await db.query('debts', where: 'customer_name = (SELECT name FROM customers WHERE id = ?)', whereArgs: [id]);
       if (debts.isNotEmpty) return -2; // له ديون
-      return await db.delete('customers', where: 'id = ?', whereArgs: [id]);
+      final oldRows = await db.query('customers', where: 'id = ?', whereArgs: [id], limit: 1);
+      final rows = await db.delete('customers', where: 'id = ?', whereArgs: [id]);
+      if (rows > 0 && oldRows.isNotEmpty) {
+        await logActivity(
+          action: 'delete',
+          entity: 'customer',
+          entityId: id,
+          entityName: '${oldRows.first['name'] ?? ''}',
+          oldValue: '${oldRows.first['name'] ?? ''}',
+          newValue: 'حذف',
+          dataJson: jsonEncode(oldRows.first),
+          undoable: true,
+        );
+      }
+      return rows;
     } catch (e) {
       return 0;
     }
@@ -1327,10 +1689,10 @@ class DatabaseHelper {
     try {
     final db = await instance.database;
     int saleId = -1;
+    int subtotal = 0;
+    int itemsCount = 0;
     await db.transaction((txn) async {
-      int subtotal = 0;
       int itemsProfit = 0;
-      int itemsCount = 0;
 
       for (final item in cart) {
         final product = item['product'] as ProductModel;
@@ -1383,7 +1745,16 @@ class DatabaseHelper {
         }
       }
     });
-    if (saleId > 0) { salesRevision.value++; productsRevision.value++; _notifyAll(); }
+    if (saleId > 0) {
+      await logActivity(
+        action: 'sale',
+        entity: 'sale',
+        entityId: saleId,
+        entityName: customerName.trim().isNotEmpty ? customerName.trim() : 'زبون نقدي',
+        newValue: 'بيع — ${subtotal - discountValue} د.ع / $itemsCount قطعة',
+      );
+      salesRevision.value++; productsRevision.value++; _notifyAll();
+    }
     return saleId;
     } catch (e, st) {
       print('ERROR completeSale: $e');
@@ -1913,6 +2284,20 @@ class DatabaseHelper {
           'amount': amount,
           'created_at': DateTime.now().toIso8601String(),
         });
+        // سجل التعديلات الشامل — استرجاع الإضافة يعيد المبلغ القديم
+        await txn.insert('activity_log', {
+          'action': 'debt_add',
+          'entity': 'debt',
+          'entity_id': debtId,
+          'entity_name': '${rows.first['supplier_name'] ?? ''}',
+          'field': 'amount',
+          'old_value': '$currentAmount',
+          'new_value': '${currentAmount + amount} (أضيف $amount)',
+          'is_bulk': 0,
+          'undoable': 1,
+          'undone': 0,
+          'created_at': DateTime.now().toIso8601String(),
+        });
         return true;
       });
     } catch (e) {
@@ -1960,6 +2345,19 @@ class DatabaseHelper {
           'new_stock': newStock,
           'difference': newStock - oldStock,
           'reason': reason.trim(),
+          'created_at': now,
+        });
+        await txn.insert('activity_log', {
+          'action': 'stock',
+          'entity': 'stock',
+          'entity_id': productId,
+          'entity_name': product.name,
+          'field': 'stock',
+          'old_value': '$oldStock',
+          'new_value': '$newStock',
+          'is_bulk': 0,
+          'undoable': 1,
+          'undone': 0,
           'created_at': now,
         });
         return true;
@@ -2024,7 +2422,13 @@ class DatabaseHelper {
   Future<bool> returnSale(int saleId) async {
     try {
       final db = await instance.database;
+      String saleInfo = '';
       await db.transaction((txn) async {
+        final saleRows = await txn.query('sales', where: 'id = ?', whereArgs: [saleId], limit: 1);
+        if (saleRows.isNotEmpty) {
+          final s = saleRows.first;
+          saleInfo = '${s['receipt_number'] ?? 'R$saleId'} — ${s['total_amount']} د.ع';
+        }
         final items = await txn.query('sale_items', where: 'sale_id = ?', whereArgs: [saleId]);
         for (final item in items) {
           final productId = item['product_id'] as int;
@@ -2034,6 +2438,16 @@ class DatabaseHelper {
         await txn.delete('sale_items', where: 'sale_id = ?', whereArgs: [saleId]);
         await txn.delete('sales', where: 'id = ?', whereArgs: [saleId]);
       });
+      if (saleInfo.isNotEmpty) {
+        await logActivity(
+          action: 'return',
+          entity: 'sale',
+          entityId: saleId,
+          entityName: saleInfo,
+          oldValue: saleInfo,
+          newValue: 'إرجاع كامل',
+        );
+      }
       salesRevision.value++;
       productsRevision.value++;
       _notifyAll();
@@ -2050,6 +2464,7 @@ class DatabaseHelper {
     if (returnQtys.isEmpty) return false;
     try {
       final db = await instance.database;
+      String summary = '';
       await db.transaction((txn) async {
         int returnedAmount = 0;
         int returnedProfit = 0;
@@ -2103,7 +2518,17 @@ class DatabaseHelper {
             WHERE id = ?
           ''', [returnedAmount, returnedProfit, returnedCount, saleId]);
         }
+        summary = 'إرجاع جزئي — $returnedAmount د.ع / $returnedCount قطعة';
       });
+      if (summary.isNotEmpty) {
+        await logActivity(
+          action: 'return',
+          entity: 'sale',
+          entityId: saleId,
+          entityName: 'R$saleId',
+          newValue: summary,
+        );
+      }
       salesRevision.value++;
       productsRevision.value++;
       _notifyAll();
@@ -2664,7 +3089,16 @@ class DatabaseHelper {
         'note': note?.trim(),
         'created_at': DateTime.now().toIso8601String(),
       });
-      if (id > 0) { expensesRevision.value++; _notifyAll(); }
+      if (id > 0) {
+        await logActivity(
+          action: 'add',
+          entity: 'expense',
+          entityId: id,
+          entityName: category.trim(),
+          newValue: '$amount د.ع${(note?.trim().isNotEmpty ?? false) ? ' — ${note!.trim()}' : ''}',
+        );
+        expensesRevision.value++; _notifyAll();
+      }
       return id;
     } catch (e) {
       print('Error inserting expense: $e');
@@ -2684,7 +3118,21 @@ class DatabaseHelper {
   Future<bool> deleteExpense(int id) async {
     try {
       final db = await instance.database;
+      final oldRows = await db.query('expenses', where: 'id = ?', whereArgs: [id], limit: 1);
       await db.delete('expenses', where: 'id = ?', whereArgs: [id]);
+      if (oldRows.isNotEmpty) {
+        final e = oldRows.first;
+        await logActivity(
+          action: 'delete',
+          entity: 'expense',
+          entityId: id,
+          entityName: '${e['category'] ?? ''}',
+          oldValue: '${e['amount']} د.ع',
+          newValue: 'حذف',
+          dataJson: jsonEncode(e),
+          undoable: true,
+        );
+      }
       expensesRevision.value++;
       _notifyAll();
       return true;
