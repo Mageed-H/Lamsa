@@ -1001,9 +1001,6 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
             padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
             child: pw.Row(
               children: [
-                pw.Expanded(flex: 3, child: pw.Text('$rowTotal', style: bodyBold(), textAlign: pw.TextAlign.center)),
-                pw.Expanded(flex: 3, child: pw.Text('$itemPrice', style: body(), textAlign: pw.TextAlign.center)),
-                pw.Expanded(flex: 2, child: pw.Text('x$qty', style: body(), textAlign: pw.TextAlign.center)),
                 pw.Expanded(
                   flex: 4,
                   child: pw.Column(
@@ -1014,6 +1011,9 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
                     ],
                   ),
                 ),
+                pw.Expanded(flex: 2, child: pw.Text('x$qty', style: body(), textAlign: pw.TextAlign.center)),
+                pw.Expanded(flex: 3, child: pw.Text('$itemPrice', style: body(), textAlign: pw.TextAlign.center)),
+                pw.Expanded(flex: 3, child: pw.Text('$rowTotal', style: bodyBold(), textAlign: pw.TextAlign.center)),
               ],
             ),
           ),
@@ -1043,13 +1043,13 @@ class _SaleDetailsSheetState extends State<_SaleDetailsSheet> {
                 pw.Text('رقم الوصل: R${widget.saleId.toString().padLeft(6, '0')}', style: bodyBold(), textDirection: pw.TextDirection.rtl),
                 solidDiv,
                 pw.SizedBox(height: 2),
-                // رأس الجدول (ترتيب RTL: الإجمالي | السعر | العدد | اسم المادة)
+                // رأس الجدول (ترتيب RTL: اسم المادة | العدد | السعر | الإجمالي)
                 pw.Row(
                   children: [
-                    pw.Expanded(flex: 3, child: pw.Text('الإجمالي', style: bodyBold(), textAlign: pw.TextAlign.center)),
-                    pw.Expanded(flex: 3, child: pw.Text('السعر', style: bodyBold(), textAlign: pw.TextAlign.center)),
-                    pw.Expanded(flex: 2, child: pw.Text('العدد', style: bodyBold(), textAlign: pw.TextAlign.center)),
                     pw.Expanded(flex: 4, child: pw.Text('اسم المادة', style: bodyBold(), textDirection: pw.TextDirection.rtl, textAlign: pw.TextAlign.center)),
+                    pw.Expanded(flex: 2, child: pw.Text('العدد', style: bodyBold(), textAlign: pw.TextAlign.center)),
+                    pw.Expanded(flex: 3, child: pw.Text('السعر', style: bodyBold(), textAlign: pw.TextAlign.center)),
+                    pw.Expanded(flex: 3, child: pw.Text('الإجمالي', style: bodyBold(), textAlign: pw.TextAlign.center)),
                   ],
                 ),
                 pw.SizedBox(height: 2, child: pw.Divider(thickness: 0.8, color: PdfColors.black)),
